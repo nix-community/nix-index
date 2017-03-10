@@ -1,0 +1,23 @@
+extern crate rustc_serialize;
+extern crate serde_json;
+extern crate pbr;
+extern crate xml;
+extern crate async_http_client;
+extern crate futures;
+extern crate tokio_core;
+extern crate tokio_curl;
+extern crate curl;
+extern crate xz2;
+extern crate serde;
+extern crate bincode;
+extern crate grep;
+extern crate ansi_term;
+#[macro_use] extern crate serde_derive;
+extern crate void;
+extern crate ordermap;
+
+pub mod nixpkgs;
+pub mod files;
+pub mod hydra;
+pub mod util;
+pub mod workset;

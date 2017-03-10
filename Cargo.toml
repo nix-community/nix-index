@@ -1,8 +1,32 @@
 [package]
-name = "nixpkgs-locate"
-version = "0.1.0"
 authors = ["Benno Fünfstück <benno.fuenfstueck@gmail.com>"]
+name = "nix-index"
+version = "0.1.0"
 
 [dependencies]
-hyper = "0.10.4"
-json = "0.11.5"
+ansi_term = "0.9.0"
+async-http-client = "0.2.0"
+bincode = "1.0.0-alpha2"
+clap = "2.20.5"
+curl = "0.4.6"
+futures = "0.1.10"
+grep = "0.1.5"
+lz4 = "1.20.0"
+ordermap = "0.2.8"
+pbr = "1.0.0-alpha.2"
+rustc-serialize = "0.3.22"
+separator = "0.3.1"
+serde = "0.9.7"
+serde_derive = "0.9.7"
+serde_json = "0.9.8"
+tokio-core = "0.1.4"
+tokio-curl = "0.1.9"
+void = "1.0.2"
+xdg = "2.0.0"
+xml-rs = "0.3.5"
+xz2 = "0.1.1"
+
+[profile]
+
+[profile.release]
+debug = true
