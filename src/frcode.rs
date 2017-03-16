@@ -89,12 +89,12 @@ impl<R: BufRead> Decoder<R> {
         self.entry.resize(self.shared_len as usize, 0);
         self.reader.read_until(b'\0', &mut self.entry)?;
 
+        if self.entry.pop() != Some(b'\x00') {
+            return Err(Error::MissingNul)
+        }
+
         if self.entry.get(0) != Some(&b'\x01') {
-            if self.entry.pop() == Some(b'\x00') {
-                Ok(Item::Entry(&self.entry))
-            } else {
-                Err(Error::MissingNul)
-            }
+            Ok(Item::Entry(&self.entry))
         } else {
             Ok(Item::Footer(self.entry.split_off(1)))
         }

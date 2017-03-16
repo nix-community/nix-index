@@ -273,7 +273,12 @@ fn locate(args: ArgsLocate) -> Result<(), Error> {
             Symlink { .. } => ("S", 0),
         };
 
-        print!("{:>1} {:<40} {:>14} ", t, store_path.name(), s.separated_string());
+        let mut desc = format!("{}.{}", store_path.origin().attr, store_path.origin().output);
+        if !store_path.origin().toplevel {
+            desc = format!("({})", desc);
+        }
+
+        print!("{:>1} {:<40} {:<40} {:>14} ", t, desc, store_path.name(), s.separated_string());
 
         io::stdout().write_all(&path)?;
         io::stdout().write_all(b"\n")?;

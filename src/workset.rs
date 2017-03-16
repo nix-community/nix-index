@@ -14,8 +14,15 @@ struct Shared<K, V> {
 
 impl<K: Hash + Eq, V> Shared<K, V> {
     fn insert(&mut self, k: K, v: V) -> bool {
+        use ordermap::Entry::*;
         if !self.seen.contains(&k) {
-            return self.queue.insert(k, v).is_none()
+            match self.queue.entry(k) {
+                Occupied(_) => return false,
+                Vacant(e) => {
+                    e.insert(v);
+                    return true
+                }
+            }
         }
         false
     }
