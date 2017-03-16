@@ -154,6 +154,7 @@ impl<'a, 'b> ReaderIter<'a, 'b> {
             }
 
             if self.reader.buf[mat.start()] != b'/' {
+                self.pos = mat.end();
                 continue
             }
 
