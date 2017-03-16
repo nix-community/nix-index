@@ -4,46 +4,8 @@ use xml::reader::{EventReader, XmlEvent};
 use xml::common::{TextPosition, Position};
 use std::process::{Command, Stdio, Child, ChildStdout};
 use std::fmt;
-use std::borrow::{Cow};
 
-#[derive(Debug, Clone, Deserialize, Serialize)]
-pub struct Package {
-    pub attr: String,
-    pub output: String,
-}
-
-#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub struct StorePath {
-    store_dir: String,
-    hash: String,
-    name: String,
-}
-
-impl StorePath {
-    pub fn parse(path: &str) -> Option<StorePath> {
-        let mut parts = path.splitn(2, '-');
-        parts.next().and_then(|prefix| {
-            parts.next().and_then(|name| {
-                let mut iter = prefix.rsplitn(2, '/');
-                iter.next().map(|hash| {
-                    let store_dir = iter.next().unwrap_or("");
-                    StorePath {
-                        store_dir: store_dir.to_string(),
-                        hash: hash.to_string(),
-                        name: name.to_string(),
-                    }
-                })
-            })
-        })
-    }
-
-    pub fn name(&self) -> Cow<str> { Cow::Borrowed(&self.name) }
-    pub fn hash(&self) -> Cow<str> { Cow::Borrowed(&self.hash) }
-    pub fn store_dir(&self) -> Cow<str> { Cow::Borrowed(&self.store_dir) }
-    pub fn as_str(&self) -> Cow<str> {
-        Cow::Owned(format!("{}/{}-{}", self.store_dir, self.hash, self.name))
-    }
-}
+use package::{PathOrigin, StorePath};
 
 pub struct PackagesParser<R: Read> {
     events: EventReader<R>,
@@ -111,7 +73,7 @@ impl<R: Read> PackagesParser<R> {
         ParserError { position: self.events.position(), kind: kind }
     }
 
-    fn next_err(&mut self) -> Result<Option<(StorePath, Package)>, ParserError> {
+    fn next_err(&mut self) -> Result<Option<StorePath>, ParserError> {
         use self::XmlEvent::*;
         use self::ParserErrorKind::*;
 
@@ -164,11 +126,11 @@ impl<R: Read> PackagesParser<R> {
                                 attribute_name: "path".into(),
                             }) )?;
 
-                            let store_path = StorePath::parse(&output_path);
+                            let origin = PathOrigin { attr: item, output: output_name, toplevel: true };
+                            let store_path = StorePath::parse(origin, &output_path);
                             let store_path = store_path.ok_or( self.err(InvalidStorePath { path: output_path }) )?;
-                            let package = Package { attr: item, output: output_name };
 
-                            return Ok(Some((store_path, package)))
+                            return Ok(Some(store_path))
                         } else {
                             return Err(self.err(MissingParent {
                                 element_name: "output".into(),
@@ -199,9 +161,9 @@ impl<R: Read> PackagesParser<R> {
 }
 
 impl<R: Read> Iterator for PackagesParser<R> {
-    type Item = Result<(StorePath, Package), ParserError>;
+    type Item = Result<StorePath, ParserError>;
 
-    fn next(&mut self) -> Option<Result<(StorePath, Package), ParserError>> {
+    fn next(&mut self) -> Option<Result<StorePath, ParserError>> {
         match self.next_err() {
             Err(e) => Some(Err(e)),
             Ok(Some(i)) => Some(Ok(i)),
@@ -265,7 +227,7 @@ impl<R: Read> PackagesQuery<R> {
 }
 
 impl<R: Read> Iterator for PackagesQuery<R> {
-    type Item = Result<(StorePath, Package), Error>;
+    type Item = Result<StorePath, Error>;
     fn next(&mut self) -> Option<Self::Item> {
         self.parser.take().and_then(|mut parser| {
             parser.next().map(|v| {

@@ -1,79 +1,182 @@
+//! Basic data types for working with trees of files.
+//!
+//! The main type here is `FileTree` which represents
+//! such as the file listing for a store path.
 use std::collections::{HashMap};
 use serde::bytes::{ByteBuf};
-use grep::{Grep};
+use std::str;
+use std::io::{self, Write};
+use memchr::memchr;
 
+/// This enum represents a single node in a file tree.
+///
+/// The type is generic over the contents of a directory node,
+/// because we want to use this enum to represent both a flat 
+/// structure where a directory only stores some meta-information about itself
+/// (such as the number of children) and full file trees, where a
+/// directory contains all the child nodes.
+/// 
+/// Note that file nodes by themselves do not have names. Names are given
+/// to file nodes by the parent directory, which has a map of entry names to
+/// file nodes.
 #[derive(Debug, PartialEq, Serialize, Deserialize, Clone)]
-pub enum Files {
-    Leaf(File),
-    Directory {
-        entries: HashMap<ByteBuf, Files>,
+pub enum FileNode<T> {
+    /// A regular file. This is the normal kind of file which is
+    /// neither a directory not a symlink.
+    Regular {
+        /// The size of this file, in bytes.
+        size: u64,
+        /// Whether or not this file has the `executable` bit set.
+        executable: bool
     },
-    Empty,
+    /// A symbolic link that points to another file path.
+    Symlink {
+        /// The path that this symlink points to.
+        target: ByteBuf
+    },
+    /// A directory. It usually has a mapping of names to child nodes (in
+    /// the case of a fill tree), but we also support a reduced form where
+    /// we only store the number of entries in the directory.
+    Directory {
+        /// The size of a directory is the number of children it contains.
+        size: u64,
+
+        /// The contents of this directory. These are generic, as explained
+        /// in the documentation for this type.
+        contents: T,
+    }
 }
 
+impl<T> FileNode<T> {
+    /// Split this node into a node without contents and optionally the contents themselves,
+    /// if the node was a directory.
+    pub fn split_contents(&self) -> (FileNode<()>, Option<&T>) {
+        use self::FileNode::*;
+        match self {
+            &Regular { size, executable } => (Regular { size: size, executable: executable }, None),
+            &Symlink { ref target } => (Symlink { target: target.clone() }, None),
+            &Directory { size, ref contents } => (Directory { size: size, contents: () }, Some(contents)),
+        }
+    }
+}
+
+impl FileNode<()> {
+    pub fn encode<W: Write>(&self, writer: &mut W) -> io::Result<()> {
+        use self::FileNode::*;
+        match self {
+            &Regular { executable, size } => {
+                let e = if executable { "x" } else { "r" };
+                write!(writer, "{}{}", e, size)?;
+            }
+            &Symlink { ref target } => {
+                writer.write_all(b"s")?;
+                writer.write_all(target)?;
+            },
+            &Directory { size, contents: () }=> {
+                write!(writer, "d{}", size)?;
+            }
+        }
+        Ok(())
+    }
+
+    pub fn decode(buf: &[u8]) -> Option<Self> {
+        use self::FileNode::*;
+        buf.split_first().and_then(|(kind, buf)| match *kind {
+            b'x' | b'r' => {
+                let executable = *kind == b'x';
+                str::from_utf8(buf).ok().and_then(|s| s.parse().ok()).map(|size| {
+                    Regular { executable: executable, size: size }
+                })
+            },
+            b's' => {
+                Some(Symlink { target: ByteBuf::from(buf) })
+            },
+            b'd' => {
+                str::from_utf8(buf).ok().and_then(|s| s.parse().ok()).map(|size| {
+                    Directory { size: size, contents: () }
+                })
+            },
+            _ => None,
+        })
+    }
+}
+
+/// This type represents a full tree of files.
+///
+/// A *file tree* is a *file node* where each directory contains
+/// the tree for its children.
 #[derive(Debug, PartialEq, Serialize, Deserialize, Clone)]
-pub enum File {
-    Regular { size: u64, executable: bool },
-    Symlink { target: ByteBuf },
-}
+pub struct FileTree(FileNode<HashMap<ByteBuf, FileTree>>);
 
-pub struct FileWithPath {
+/// An entry in a file tree is a path to a node paired with that node.
+///
+/// If the entry refers to a directory, it only stores information about that
+/// directory itself. It does not contain the children of the directory.
+pub struct FileTreeEntry {
     pub path: Vec<u8>,
-    pub file: File,
+    pub node: FileNode<()>,
 }
 
-impl Files {
-    pub fn is_leaf(&self) -> bool {
-        use self::Files::*;
-        match self {
-            &Leaf(..) | &Empty => true,
-            &Directory {..} => false,
-        }
+impl FileTreeEntry {
+    pub fn encode<W: Write>(&self, writer: &mut W) -> io::Result<()> {
+        writer.write_all(&self.path)?;
+        writer.write_all(b"\n")?;
+        self.node.encode(writer)?;
+        Ok(())
     }
 
-    pub fn empty() -> Files {
-        Files::Empty
+    pub fn decode(buf: &[u8]) -> Option<FileTreeEntry> {
+        memchr(b'\n', buf).and_then(|sep| {
+            let node = &buf[(sep + 1)..];
+            let path = &buf[0..sep];
+            FileNode::decode(node).map(|node| {
+                FileTreeEntry {
+                    path: path.to_vec(),
+                    node: node,
+                }
+            })
+        })
+    }
+}
+
+impl FileTree {
+    pub fn regular(size: u64, executable: bool) -> Self {
+        FileTree(FileNode::Regular { size: size, executable: executable })
     }
 
-    pub fn is_empty(&self) -> bool {
-        match self {
-            &Files::Empty => true,
-            _ => false,
-        }
+    pub fn symlink(target: ByteBuf) -> Self {
+        FileTree(FileNode::Symlink { target: target })
     }
 
-    pub fn to_list(&self) -> Vec<FileWithPath> {
-        use self::Files::*;
+    pub fn directory(entries: HashMap<ByteBuf, FileTree>) -> Self {
+        FileTree(FileNode::Directory {
+            size: entries.len() as u64,
+            contents: entries,
+        })
+    }
 
+    pub fn to_list(&self) -> Vec<FileTreeEntry> {
         let mut result = Vec::new();
 
         let mut stack = Vec::with_capacity(16);
         stack.push((Vec::new(), self));
 
-        while let Some((path, current)) = stack.pop() {
-            match current {
-
-                &Leaf(ref file) => {
-                    result.push(FileWithPath { file: file.clone(), path: path });
-                },
-                &Directory { ref entries } => {
-                    for (name, entry) in entries {
-                        let mut path = path.clone();
-                        path.push(b'/');
-                        path.extend_from_slice(name);
-                        stack.push((path, &entry));
-                    }
-                },
-                &Empty => {}
+        while let Some(entry) = stack.pop() {
+            let path = entry.0;
+            let &FileTree(ref current) = entry.1;
+            let (node, contents) = current.split_contents();
+            if let Some(entries) = contents {
+                let mut entries = entries.iter().collect::<Vec<_>>();
+                entries.sort_by(|a, b| Ord::cmp(a.0, b.0));
+                for (name, entry) in entries {
+                    let mut path = path.clone();
+                    path.push(b'/');
+                    path.extend_from_slice(name);
+                    stack.push((path, &entry));
+                }
             }
+            result.push(FileTreeEntry { path: path, node: node });
         }
         result
-    }
-
-    pub fn grep(&self, grep: &Grep) -> Vec<FileWithPath> {
-        let files = self.to_list();
-        files.into_iter().filter(|file| {
-            grep.regex().find(&file.path).is_some()
-        }).collect()
     }
 }

@@ -18,8 +18,8 @@ use xz2::read::XzDecoder;
 use serde::de::{Deserialize, Deserializer, MapVisitor, Visitor};
 use serde::bytes::{ByteBuf};
 
-use files::{Files, File};
-use nixpkgs::{StorePath};
+use files::{FileTree};
+use package::{StorePath, PathOrigin};
 
 #[derive(Deserialize, Debug, PartialEq)]
 struct FileListingResponse {
@@ -27,10 +27,10 @@ struct FileListingResponse {
 }
 
 #[derive(Debug, PartialEq)]
-struct HydraFileListing(Files);
+struct HydraFileListing(FileTree);
 
 pub fn fetch_files<'a>(cache_url: &str, session: &'a Session, path: &StorePath) ->
-    Box<Future<Item=Option<Files>, Error=Error> + 'a>
+    Box<Future<Item=Option<FileTree>, Error=Error> + 'a>
 {
     let url = format!("{}/{}.ls.xz", cache_url, path.hash());
     let name = format!("{}.json", path.hash());
@@ -94,13 +94,13 @@ impl Deserialize for HydraFileListing {
         struct Root;
 
         impl Visitor for Root {
-            type Value = Files;
+            type Value = FileTree;
 
             fn expecting(&self, f: &mut fmt::Formatter) -> fmt::Result {
                 write!(f, "a file listing (map)")
             }
 
-            fn visit_map<V: MapVisitor>(self, mut visitor: V) -> Result<Files, V::Error> {
+            fn visit_map<V: MapVisitor>(self, mut visitor: V) -> Result<FileTree, V::Error> {
                 const VARIANTS: &'static [&'static str] = &["regular", "directory", "symlink"];
 
                 let mut typ: Option<ByteBuf> = None;
@@ -151,16 +151,16 @@ impl Deserialize for HydraFileListing {
                     b"regular" => {
                         let size = size.ok_or(serde::de::Error::missing_field("size"))?;
                         let executable = executable.unwrap_or(false);
-                        Ok(Files::Leaf(File::Regular { size: size, executable: executable }))
+                        Ok(FileTree::regular(size, executable))
                     },
                     b"directory" => {
                         let entries = entries.ok_or(serde::de::Error::missing_field("entries"))?;
                         let entries = entries.into_iter().map(|(k, v)| (k, v.0)).collect();
-                        Ok(Files::Directory { entries: entries })
+                        Ok(FileTree::directory(entries))
                     },
                     b"symlink" => {
                         let target = target.ok_or(serde::de::Error::missing_field("target"))?;
-                        Ok(Files::Leaf(File::Symlink { target: target }))
+                        Ok(FileTree::symlink(target))
                     },
                     _ => {
                         Err(serde::de::Error::unknown_variant(&String::from_utf8_lossy(typ), VARIANTS))
@@ -251,8 +251,9 @@ pub fn fetch_references<'a>(cache_url: &str, session: &'a Session, mut path: Sto
                 if line.starts_with(references) {
                     let line = &line[references.len()..];
                     let line = str::from_utf8(line).map_err(|e| Error::InvalidUnicode(line.to_vec(), e))?;
-                    result = line.trim().split_whitespace().map(|path| {
-                        StorePath::parse(path).ok_or(Error::InvalidStorePath(path.to_string()))
+                    result = line.trim().split_whitespace().map(|new_path| {
+                        let new_origin = PathOrigin { toplevel: false, ..path.origin().into_owned() };
+                        StorePath::parse(new_origin, new_path).ok_or(Error::InvalidStorePath(new_path.to_string()))
                     }).collect::<Result<Vec<_>, _>>()?;
                 }
 
@@ -261,7 +262,7 @@ pub fn fetch_references<'a>(cache_url: &str, session: &'a Session, mut path: Sto
                     let line = str::from_utf8(line).map_err(|e| Error::InvalidUnicode(line.to_vec(), e))?;
                     let line = line.trim();
 
-                    path = StorePath::parse(line).ok_or(Error::InvalidStorePath(line.to_string()))?;
+                    path = StorePath::parse(path.origin().into_owned(), line).ok_or(Error::InvalidStorePath(line.to_string()))?;
                 }
             }
 

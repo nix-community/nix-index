@@ -3,6 +3,10 @@ authors = ["Benno Fünfstück <benno.fuenfstueck@gmail.com>"]
 name = "nix-index"
 version = "0.1.0"
 
+[[bin]]
+doc = false
+name = "nix-index"
+
 [dependencies]
 ansi_term = "0.9.0"
 async-http-client = "0.2.0"
@@ -12,8 +16,10 @@ curl = "0.4.6"
 futures = "0.1.10"
 grep = "0.1.5"
 lz4 = "1.20.0"
+memchr = "1.0.1"
 ordermap = "0.2.8"
 pbr = "1.0.0-alpha.2"
+regex = "0.2.1"
 rustc-serialize = "0.3.22"
 separator = "0.3.1"
 serde = "0.9.7"
@@ -21,10 +27,13 @@ serde_derive = "0.9.7"
 serde_json = "0.9.8"
 tokio-core = "0.1.4"
 tokio-curl = "0.1.9"
+tokio-retry = "0.0.4"
+tokio-timer = "0.1.0"
 void = "1.0.2"
 xdg = "2.0.0"
 xml-rs = "0.3.5"
 xz2 = "0.1.1"
+zstd = "0.4.3"
 
 [profile]
 
