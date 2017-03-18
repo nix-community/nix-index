@@ -1,4 +1,4 @@
-//! Basic data types for working with trees of files.
+//! Data types for working with trees of files.
 //!
 //! The main type here is `FileTree` which represents
 //! such as the file listing for a store path.
@@ -64,6 +64,7 @@ pub enum FileType {
     Symlink,
 }
 
+/// This lists all file types that can currently be represented.
 pub const ALL_FILE_TYPES: &'static [FileType] = &[
     FileType::Regular { executable: true },
     FileType::Regular { executable: false },
