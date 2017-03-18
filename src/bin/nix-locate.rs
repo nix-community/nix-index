@@ -5,7 +5,6 @@ extern crate separator;
 extern crate xdg;
 extern crate regex;
 
-use std::fmt;
 use std::io::{self, Write};
 use std::path::{PathBuf};
 use std::process;
@@ -46,20 +45,6 @@ impl From<regex::Error> for Error {
 }
 
 
-impl fmt::Display for Error {
-    fn fmt(&self, f: &mut fmt::Formatter) -> Result<(), fmt::Error>{
-        use Error::*;
-        match self {
-            &Io(ref e) => write!(f, "input/output error: {}", e),
-            &DatabaseReadError(ref e) =>
-                write!(f, "error while parsing database: {}", e),
-            &GrepError(ref e) =>
-                write!(f, "couldn't construct regex: {}", e),
-            &Args(ref e) => write!(f, "{}", e),
-        }
-    }
-}
-
 struct Args {
     database: PathBuf,
     pattern: String,
@@ -67,6 +52,7 @@ struct Args {
     hash: Option<String>,
     name_pattern: Option<String>,
     file_type: Vec<FileType>,
+    only_toplevel: bool,
 }
 
 fn locate(args: Args) -> Result<(), Error> {
@@ -84,9 +70,9 @@ fn locate(args: Args) -> Result<(), Error> {
         let &(ref store_path, FileTreeEntry { ref path, ref node }) = v;
         let m = pattern.regex().find_iter(&path).last().expect("path matches pattern");
 
-        if path[m.end()..].contains(&b'/') && args.group { return false }
-
         let conditions = [
+            !args.group || !path[m.end()..].contains(&b'/'),
+            !args.only_toplevel || (*store_path.origin()).toplevel,
             args.hash.as_ref().map_or(true, |h| h == &store_path.hash()),
             name_pattern.as_ref().map_or(true, |r| r.is_match(&store_path.name())),
             args.file_type.iter().any(|t| &node.get_type() == t),
@@ -145,8 +131,8 @@ fn run<'a>(matches: ArgMatches<'a>) -> Result<(), Error> {
                 "d" => FileType::Directory,
                 _ => unreachable!("file type can only be one of x, r, s and d (verified by clap already)"),
             }).collect()
-        })
-            
+        }),
+        only_toplevel: matches.is_present("toplevel"),
     };
 
     return locate(args);
@@ -183,6 +169,9 @@ fn main() {
              .long("hash")
              .value_name("HASH")
              .help("Only print matches from the package that has the given HASH."))
+        .arg(Arg::with_name("toplevel")
+             .long("toplevel")
+             .help("Only print matches from packages that show up in nix-env -qa."))
         .arg(Arg::with_name("type")
              .short("t")
              .long("type")
@@ -190,8 +179,9 @@ fn main() {
              .number_of_values(1)
              .value_name("TYPE")
              .possible_values(&["d", "x", "r", "s"])
-             .help("Only print matches for files that have this type.\n\
-                    If the option is given multiple times, a file will be printed if it has any of the given types.\n"))
+             .help("Only print matches for files that have this type.\
+                    If the option is given multiple times, a file will be printed if it has any of the given types."
+             ))
          .arg(Arg::with_name("no-group")
               .long("no-group")
               .help("Disables grouping of paths with the same matching part. \n\
@@ -199,14 +189,27 @@ fn main() {
                      of the last component of the path. For example, the pattern `a/foo` would\n\
                      match all of `a/foo`, `a/foo/some_file` and `a/foo/another_file`, but only\n\
                      the first match will be printed. This option disables that behavior and prints\n\
-                     all matches."))
+                     all matches."
+              ))
+
+
+
         .get_matches();
 
     run(matches).unwrap_or_else(|e| {
-        if let Error::Args(e) = e {
-            e.exit()
+        use Error::*;
+        match e {
+            Args(e) => e.exit(),
+            Io(e) => writeln!(io::stderr(), "An I/O operation failed: {}", e).unwrap(),
+            DatabaseReadError(e) => {
+                writeln!(io::stderr(),
+                         "The database could not be read: {}\n", e).unwrap();
+            },
+            GrepError(e) => {
+                writeln!(io::stderr(),
+                         "Constructing the regex matcher failed with: {}", e).unwrap();
+            }
         }
-        writeln!(&mut io::stderr(), "{}", e).unwrap();
         process::exit(2);
     });
 }
