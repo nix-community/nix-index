@@ -170,7 +170,7 @@ fn main() {
              .value_name("HASH")
              .help("Only print matches from the package that has the given HASH."))
         .arg(Arg::with_name("toplevel")
-             .long("toplevel")
+             .long("top-level")
              .help("Only print matches from packages that show up in nix-env -qa."))
         .arg(Arg::with_name("type")
              .short("t")
