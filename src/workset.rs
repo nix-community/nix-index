@@ -2,7 +2,7 @@ use futures::{Stream, Async, Poll};
 use std::collections::{HashSet};
 use ordermap::{OrderMap};
 use void::{Void};
-use std::rc::{Rc};
+use std::rc::{Rc, Weak};
 use std::cell::{RefCell};
 use std::hash::{Hash};
 use std::iter::{FromIterator};
@@ -41,12 +41,27 @@ impl<K: Hash + Eq, V> WorkSetHandle<K, V> {
         self.state.borrow_mut().insert(key, work)
     }
 
-    pub fn queue_len(&self) -> usize {
-        self.state.borrow().queue.len()
+}
+
+pub trait WorkSetObserver {
+    fn queue_len(&self) -> usize;
+}
+
+pub type WorkSetWatch = Box<WorkSetObserver>;
+
+#[derive(Clone)]
+struct WorkSetObserverImpl<K, V> {
+    state: Weak<RefCell<Shared<K, V>>>,
+}
+
+impl<K, V> WorkSetObserver for WorkSetObserverImpl<K, V> {
+    fn queue_len(&self) -> usize {
+        self.state.upgrade().map_or(0, |shared: Rc<RefCell<Shared<K, V>>>| shared.as_ref().borrow().queue.len())
     }
 }
 
-impl<K: Hash + Eq, V> WorkSet<K, V> {
+
+impl<K: Hash + Eq + 'static, V: 'static> WorkSet<K, V> {
     pub fn from_iter<I: Iterator<Item=(K,V)>>(iter: I) -> WorkSet<K, V> {
         let shared = Shared {
             seen: HashSet::new(),
@@ -55,6 +70,12 @@ impl<K: Hash + Eq, V> WorkSet<K, V> {
         WorkSet {
             state: Rc::new(RefCell::new(shared)),
         }
+    }
+
+    pub fn watch(&self) -> WorkSetWatch {
+        Box::new(WorkSetObserverImpl {
+            state: Rc::downgrade(&self.state),
+        })
     }
 }
 

@@ -47,6 +47,30 @@ pub enum FileNode<T> {
     }
 }
 
+/// The type of a file.
+///
+/// This mirrors the variants of `FileNode`, but without storing
+/// data in each variant.
+///
+/// An exception to this is the `executable` field for the regular type.
+/// This is needed since we present `regular` and `executable` files as different
+/// to the user, so we need a way to represent both types.
+#[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord)]
+pub enum FileType {
+    Regular {
+        executable: bool,
+    },
+    Directory,
+    Symlink,
+}
+
+pub const ALL_FILE_TYPES: &'static [FileType] = &[
+    FileType::Regular { executable: true },
+    FileType::Regular { executable: false },
+    FileType::Directory,
+    FileType::Symlink,
+];
+
 impl<T> FileNode<T> {
     /// Split this node into a node without contents and optionally the contents themselves,
     /// if the node was a directory.
@@ -56,6 +80,16 @@ impl<T> FileNode<T> {
             &Regular { size, executable } => (Regular { size: size, executable: executable }, None),
             &Symlink { ref target } => (Symlink { target: target.clone() }, None),
             &Directory { size, ref contents } => (Directory { size: size, contents: () }, Some(contents)),
+        }
+    }
+
+    /// Return the type of this file.
+    pub fn get_type(&self) -> FileType {
+        use self::{FileNode, FileType};
+        match self {
+            &FileNode::Regular { executable, .. } => FileType::Regular { executable: executable },
+            &FileNode::Directory { .. } => FileType::Directory,
+            &FileNode::Symlink { .. } => FileType::Symlink,
         }
     }
 }

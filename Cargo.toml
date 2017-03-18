@@ -3,10 +3,6 @@ authors = ["Benno Fünfstück <benno.fuenfstueck@gmail.com>"]
 name = "nix-index"
 version = "0.1.0"
 
-[[bin]]
-doc = false
-name = "nix-index"
-
 [dependencies]
 ansi_term = "0.9.0"
 async-http-client = "0.2.0"
