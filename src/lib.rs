@@ -17,6 +17,7 @@ extern crate xml;
 extern crate xz2;
 extern crate zstd;
 extern crate memchr;
+extern crate byteorder;
 
 pub mod nixpkgs;
 pub mod files;

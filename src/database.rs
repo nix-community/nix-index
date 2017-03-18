@@ -1,10 +1,11 @@
-use std::io::{self, Write, BufWriter, BufReader, Seek, SeekFrom};
+use std::io::{self, Read, Write, BufWriter, BufReader, Seek, SeekFrom};
 use std::fs::{File};
 use std::path::{Path};
 use std::fmt;
 use zstd;
 use grep::{Grep, Match};
 use memchr::memchr;
+use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
 
 use package::{StorePath};
 use files::{FileTree, FileTreeEntry};
@@ -24,9 +25,10 @@ impl Drop for Writer {
 
 impl Writer {
     pub fn create<P: AsRef<Path>>(path: P, level: i32) -> io::Result<Writer> {
-        let file = File::create(path)?;
-        let mut encoder = zstd::Encoder::new(file, level)?;
-        encoder.write_all(b"\x00LOCATE02\x00")?;
+        let mut file = File::create(path)?;
+        file.write_all(FILE_MAGIC)?;
+        file.write_u64::<LittleEndian>(FORMAT_VERSION)?;
+        let encoder = zstd::Encoder::new(file, level)?;
 
         Ok(Writer {
             writer: Some(BufWriter::new(encoder))
@@ -60,10 +62,15 @@ impl Writer {
 pub enum Error {
     Io(io::Error),
     Frcode(frcode::Error),
+    UnsupportedFileType,
+    UnsupportedVersion(u64),
     MissingFileMeta(Vec<u8>),
     EntryParseFailed(Vec<u8>),
     StorePathParseFailed(Vec<u8>),
 }
+
+const FORMAT_VERSION: u64 = 1;
+const FILE_MAGIC: &'static [u8] = b"NIXI";
 
 impl fmt::Display for Error {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
@@ -74,6 +81,8 @@ impl fmt::Display for Error {
             &MissingFileMeta(ref e) => write!(f, "format error, file without meta information: {}", String::from_utf8_lossy(e)),
             &EntryParseFailed(ref e) => write!(f, "failed to parse entry. raw entry: {}", String::from_utf8_lossy(e)),
             &StorePathParseFailed(ref e) => write!(f, "failed to parse store path. raw bytes: {}", String::from_utf8_lossy(e)),
+            &UnsupportedVersion(v) => write!(f, "this executable only supports the nix-index database version {}, but found a database with version {}", FORMAT_VERSION, v),
+            &UnsupportedFileType => write!(f, "the file is not a nix-index database")
         }
     }
 }
@@ -92,8 +101,20 @@ pub struct Reader {
 }
 
 impl Reader {
-    pub fn open<P: AsRef<Path>>(path: P) -> io::Result<Reader> {
-        let file = File::open(path)?;
+    pub fn open<P: AsRef<Path>>(path: P) -> Result<Reader, Error> {
+        let mut file = File::open(path)?;
+        let mut magic = [0u8; 4];
+        file.read_exact(&mut magic)?;
+
+        if magic != FILE_MAGIC {
+            return Err(Error::UnsupportedFileType)
+        }
+
+        let version = file.read_u64::<LittleEndian>()?;
+        if version != FORMAT_VERSION {
+            return Err(Error::UnsupportedVersion(version))
+        }
+
         let decoder = zstd::Decoder::new(file)?;
         Ok(Reader {
             decoder: frcode::Decoder::new(BufReader::new(decoder)),
