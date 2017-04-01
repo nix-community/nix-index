@@ -1,3 +1,4 @@
+//! Small but reusable helper functions.
 use std::io::{self, Write};
 use std::path::{PathBuf};
 use std::fs::{OpenOptions};
@@ -6,6 +7,11 @@ use std::env;
 use futures::{IntoFuture};
 use futures::future::{self, Either, FutureResult};
 
+/// Writes a file to the temp directory with a name that is made of the supplied
+/// base and a suffix if a file with that name already exists.
+///
+/// Returns the path of the file if the file was written successfully, None otherwise.
+/// None means that an IO error occurred during writing the file.
 pub fn write_temp_file(base_name: &str, contents: &[u8]) -> Option<PathBuf> {
     let mut path = None;
     for i in 0.. {
@@ -34,6 +40,29 @@ pub fn write_temp_file(base_name: &str, contents: &[u8]) -> Option<PathBuf> {
     path
 }
 
+/// Wraps a function that produces either a future or an error in a future.
+///
+/// # Example
+///
+/// ```rust
+/// # extern crate futures;
+/// # extern crate nix_index;
+/// # use futures::{Future, future};
+/// # use nix_index::util::future_result;
+///
+/// fn make_value() -> Result<u8, &'static str> {
+///     unimplemented!()
+/// }
+///
+/// fn make_future() -> Box<Future<Item=u8, Error=&'static str>> {
+///     Box::new(future_result(|| {
+///         let value = try!(make_value());
+///          Ok(future::ok(value))
+///     }))
+/// }
+/// 
+/// # fn main() {}
+/// ```
 pub fn future_result<F, A>(f: F) -> Either<A::Future, FutureResult<A::Item, A::Error>>
     where A: IntoFuture,
           F: FnOnce() -> Result<A, A::Error>,
