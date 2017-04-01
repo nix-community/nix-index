@@ -1,4 +1,5 @@
-#[macro_use] extern crate serde_derive;
+#[macro_use]
+extern crate serde_derive;
 extern crate ansi_term;
 extern crate async_http_client;
 extern crate bincode;

@@ -1,4 +1,5 @@
-#[macro_use] extern crate clap;
+#[macro_use]
+extern crate clap;
 extern crate grep;
 extern crate nix_index;
 extern crate separator;
@@ -8,13 +9,13 @@ extern crate isatty;
 extern crate ansi_term;
 
 use std::io::{self, Write};
-use std::path::{PathBuf};
+use std::path::PathBuf;
 use std::process;
-use std::str::{self};
+use std::str;
 use separator::Separatable;
 use clap::{Arg, App, ArgMatches};
-use grep::{GrepBuilder};
-use regex::{Regex};
+use grep::GrepBuilder;
+use regex::Regex;
 use ansi_term::Colour::Red;
 
 use nix_index::database;
@@ -28,23 +29,33 @@ enum Error {
 }
 
 impl From<io::Error> for Error {
-    fn from(err: io::Error) -> Self { Error::Io(err) }
+    fn from(err: io::Error) -> Self {
+        Error::Io(err)
+    }
 }
 
 impl From<clap::Error> for Error {
-    fn from(err: clap::Error) -> Self { Error::Args(err) }
+    fn from(err: clap::Error) -> Self {
+        Error::Args(err)
+    }
 }
 
 impl From<database::Error> for Error {
-    fn from(err: database::Error) -> Self { Error::DatabaseRead(err) }
+    fn from(err: database::Error) -> Self {
+        Error::DatabaseRead(err)
+    }
 }
 
 impl From<grep::Error> for Error {
-    fn from(err: grep::Error) -> Self { Error::Grep(err) }
+    fn from(err: grep::Error) -> Self {
+        Error::Grep(err)
+    }
 }
 
 impl From<regex::Error> for Error {
-    fn from(err: regex::Error) -> Self { Error::Grep(grep::Error::Regex(err)) }
+    fn from(err: regex::Error) -> Self {
+        Error::Grep(grep::Error::Regex(err))
+    }
 }
 
 
@@ -70,23 +81,32 @@ fn locate(args: &Args) -> Result<(), Error> {
 
     let mut db = database::Reader::open(index_file)?;
 
-    let results = db.find_iter(&pattern).filter(|v| v.as_ref().ok().map_or(true, |v| {
-        let &(ref store_path, FileTreeEntry { ref path, ref node }) = v;
-        let m = match pattern.regex().find_iter(path).last() {
-            Some(m) => m,
-            None => return false,
-        };
+    let results = db.find_iter(&pattern)
+        .filter(|v| {
+            v.as_ref()
+                .ok()
+                .map_or(true, |v| {
+                    let &(ref store_path, FileTreeEntry { ref path, ref node }) = v;
+                    let m = match pattern.regex().find_iter(path).last() {
+                        Some(m) => m,
+                        None => return false,
+                    };
 
-        let conditions = [
-            !args.group || !path[m.end()..].contains(&b'/'),
-            !args.only_toplevel || (*store_path.origin()).toplevel,
-            args.hash.as_ref().map_or(true, |h| h == &store_path.hash()),
-            name_pattern.as_ref().map_or(true, |r| r.is_match(&store_path.name())),
-            args.file_type.iter().any(|t| &node.get_type() == t),
-        ];
+                    let conditions = [
+                        !args.group || !path[m.end()..].contains(&b'/'),
+                        !args.only_toplevel || (*store_path.origin()).toplevel,
+                        args.hash
+                            .as_ref()
+                            .map_or(true, |h| h == &store_path.hash()),
+                        name_pattern
+                            .as_ref()
+                            .map_or(true, |r| r.is_match(&store_path.name())),
+                        args.file_type.iter().any(|t| &node.get_type() == t),
+                    ];
 
-        conditions.iter().all(|c| *c)
-    }));
+                    conditions.iter().all(|c| *c)
+                })
+        });
 
     for v in results {
         let (store_path, FileTreeEntry { path, node }) = v?;
@@ -98,19 +118,27 @@ fn locate(args: &Args) -> Result<(), Error> {
             Symlink { .. } => ("s", 0),
         };
 
-        let mut attr = format!("{}.{}", store_path.origin().attr, store_path.origin().output);
+        let mut attr = format!("{}.{}",
+                               store_path.origin().attr,
+                               store_path.origin().output);
         if !store_path.origin().toplevel {
             attr = format!("({})", attr);
         }
 
-        print!("{:<40} {:>14} {:>1} {}", attr, size.separated_string(), typ, store_path.as_str());
+        print!("{:<40} {:>14} {:>1} {}",
+               attr,
+               size.separated_string(),
+               typ,
+               store_path.as_str());
 
         let path = String::from_utf8_lossy(&path);
 
         if args.color {
             let mut prev = 0;
             for mat in pattern.regex().find_iter(path.as_bytes()) {
-                print!("{}{}", &path[prev..mat.start()], Red.paint(&path[mat.start()..mat.end()]));
+                print!("{}{}",
+                       &path[prev..mat.start()],
+                       Red.paint(&path[mat.start()..mat.end()]));
                 prev = mat.end();
             }
             println!("{}", &path[prev..]);
@@ -123,21 +151,30 @@ fn locate(args: &Args) -> Result<(), Error> {
 }
 
 fn run<'a>(matches: &ArgMatches<'a>) -> Result<(), Error> {
-    let pattern_arg = matches.value_of("PATTERN").expect("pattern arg required").to_string();
+    let pattern_arg = matches
+        .value_of("PATTERN")
+        .expect("pattern arg required")
+        .to_string();
     let name_arg = matches.value_of("name");
-    let make_pattern = |s: &str| {
-        if matches.is_present("regex") {
-            s.to_string()
-        } else {
-            regex::escape(s)
-        }
+    let make_pattern = |s: &str| if matches.is_present("regex") {
+        s.to_string()
+    } else {
+        regex::escape(s)
     };
-    let color = matches.value_of("color").and_then(|x| {
-        if x == "auto" { return None }
-        if x == "always" { return Some(true) }
-        if x == "never" { return Some(false) }
-        unreachable!("color can only be auto, always or never (verified by clap already)")
-    });
+    let color = matches
+        .value_of("color")
+        .and_then(|x| {
+            if x == "auto" {
+                return None;
+            }
+            if x == "always" {
+                return Some(true);
+            }
+            if x == "never" {
+                return Some(false);
+            }
+            unreachable!("color can only be auto, always or never (verified by clap already)")
+        });
     let args = Args {
         database: PathBuf::from(matches.value_of("database").expect("database has default value by clap")),
         group: !matches.is_present("no-group"),
@@ -227,12 +264,13 @@ fn main() {
             Args(e) => e.exit(),
             Io(e) => writeln!(io::stderr(), "An I/O operation failed: {}", e).unwrap(),
             DatabaseRead(e) => {
-                writeln!(io::stderr(),
-                         "The database could not be read: {}\n", e).unwrap();
-            },
+                writeln!(io::stderr(), "The database could not be read: {}\n", e).unwrap();
+            }
             Grep(e) => {
                 writeln!(io::stderr(),
-                         "Constructing the regex matcher failed with: {}", e).unwrap();
+                         "Constructing the regex matcher failed with: {}",
+                         e)
+                        .unwrap();
             }
         }
         process::exit(2);

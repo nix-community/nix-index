@@ -20,7 +20,7 @@
 //! use futures::{Stream};
 //! use nix_index::workset::{WorkSet};
 //! use std::iter;
-//! 
+//!
 //! #[derive(Clone)]
 //! struct Package {
 //!     name: String,
@@ -53,13 +53,13 @@
 //! }
 //! ```
 use futures::{Stream, Async, Poll};
-use std::collections::{HashSet};
-use ordermap::{OrderMap};
-use void::{Void};
+use std::collections::HashSet;
+use ordermap::OrderMap;
+use void::Void;
 use std::rc::{Rc, Weak};
-use std::cell::{RefCell};
-use std::hash::{Hash};
-use std::iter::{FromIterator};
+use std::cell::RefCell;
+use std::hash::Hash;
+use std::iter::FromIterator;
 
 /// This structure holds the internal state of our queue.
 struct Shared<K, V> {
@@ -82,7 +82,7 @@ impl<K: Hash + Eq, V> Shared<K, V> {
                 Occupied(_) => return false,
                 Vacant(e) => {
                     e.insert(v);
-                    return true
+                    return true;
                 }
             }
         }
@@ -122,7 +122,6 @@ impl<K: Hash + Eq, V> WorkSetHandle<K, V> {
     pub fn add_work(&mut self, key: K, work: V) -> bool {
         self.state.borrow_mut().insert(key, work)
     }
-
 }
 
 /// An observer for `WorkSet` that provides status information
@@ -155,31 +154,29 @@ struct WorkSetObserverImpl<K, V> {
 
 impl<K, V> WorkSetObserver for WorkSetObserverImpl<K, V> {
     fn queue_len(&self) -> usize {
-        self.state.upgrade().map_or(0, |shared: Rc<RefCell<Shared<K, V>>>| shared.as_ref().borrow().queue.len())
+        self.state
+            .upgrade()
+            .map_or(0,
+                    |shared: Rc<RefCell<Shared<K, V>>>| shared.as_ref().borrow().queue.len())
     }
 }
 
 
 impl<K: Hash + Eq + 'static, V: 'static> WorkSet<K, V> {
-
     /// Returns a watch for this work set that provides status information.
     pub fn watch(&self) -> WorkSetWatch {
-        Box::new(WorkSetObserverImpl {
-            state: Rc::downgrade(&self.state),
-        })
+        Box::new(WorkSetObserverImpl { state: Rc::downgrade(&self.state) })
     }
 }
 
 /// Constructs a new work set with the given initial work items.
-impl<K: Hash + Eq + 'static, V: 'static> FromIterator<(K,V)> for WorkSet<K, V> where {
-    fn from_iter<I: IntoIterator<Item=(K,V)>>(iter: I) -> WorkSet<K, V> {
+impl<K: Hash + Eq + 'static, V: 'static> FromIterator<(K, V)> for WorkSet<K, V> {
+    fn from_iter<I: IntoIterator<Item = (K, V)>>(iter: I) -> WorkSet<K, V> {
         let shared = Shared {
             seen: HashSet::new(),
             queue: OrderMap::from_iter(iter),
         };
-        WorkSet {
-            state: Rc::new(RefCell::new(shared)),
-        }
+        WorkSet { state: Rc::new(RefCell::new(shared)) }
     }
 }
 
@@ -194,15 +191,17 @@ impl<K: Hash + Eq, V> Stream for WorkSet<K, V> {
     type Error = Void;
 
     fn poll(&mut self) -> Poll<Option<Self::Item>, Self::Error> {
-        let (k,v) = match self.state.borrow_mut().queue.pop() {
+        let (k, v) = match self.state.borrow_mut().queue.pop() {
             Some(e) => e,
-            None => return Ok({
-                if Rc::strong_count(&self.state) == 1 {
-                    Async::Ready(None)
-                } else {
-                    Async::NotReady
-                }
-            })
+            None => {
+                return Ok({
+                              if Rc::strong_count(&self.state) == 1 {
+                                  Async::Ready(None)
+                              } else {
+                                  Async::NotReady
+                              }
+                          })
+            }
         };
 
         self.state.borrow_mut().seen.insert(k);

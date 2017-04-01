@@ -4,14 +4,14 @@
 //! some nix derivation. We also sometimes call a `StorePath` a package, to avoid
 //! confusion with file paths.
 use std::io::{self, Write};
-use std::borrow::{Cow};
+use std::borrow::Cow;
 use std::str;
 
 /// A type for describing how to reach a given store path.
 ///
 /// When building an index, we collect store paths from various sources, such
 /// as the output of nix-env -qa and the references of those store paths.
-/// 
+///
 /// To show the user how we reached a given store path, each store path tracks
 /// its origin. For example, for top-level store paths, we know which attribute
 /// of nixpkgs builds this store path.
@@ -55,9 +55,15 @@ impl PathOrigin {
     ///
     /// Returns any errors that were encountered while writing to the supplied `Writer`.
     pub fn encode<W: Write>(&self, writer: &mut W) -> io::Result<()> {
-        assert!(!self.attr.contains('\x02'), "origin attribute path must not contain the byte value 0x02 anywhere");
-        assert!(!self.output.contains('\x02'), "origin output name must not contain the byte value 0x02 aynwhere");
-        write!(writer, "{}\x02{}{}", self.attr, self.output, if self.toplevel { "" } else { "\x02" })?;
+        assert!(!self.attr.contains('\x02'),
+                "origin attribute path must not contain the byte value 0x02 anywhere");
+        assert!(!self.output.contains('\x02'),
+                "origin output name must not contain the byte value 0x02 aynwhere");
+        write!(writer,
+               "{}\x02{}{}",
+               self.attr,
+               self.output,
+               if self.toplevel { "" } else { "\x02" })?;
         Ok(())
     }
 
@@ -66,16 +72,27 @@ impl PathOrigin {
     /// Returns the decoded path origin, or `None` if `buf` could not be decoded as path origin.
     pub fn decode(buf: &[u8]) -> Option<PathOrigin> {
         let mut iter = buf.splitn(2, |c| *c == b'\x02');
-        iter.next().and_then(|v| String::from_utf8(v.to_vec()).ok()).and_then(|attr| {
-            iter.next().and_then(|v| String::from_utf8(v.to_vec()).ok()).and_then(|mut output| {
-                let mut toplevel = true;
-                if let Some(l) = output.pop() {
-                    if l == '\x02' { toplevel = false }
-                    else { output.push(l) }
-                }
-                Some(PathOrigin { attr: attr, output: output, toplevel: toplevel })
+        iter.next()
+            .and_then(|v| String::from_utf8(v.to_vec()).ok())
+            .and_then(|attr| {
+                iter.next()
+                    .and_then(|v| String::from_utf8(v.to_vec()).ok())
+                    .and_then(|mut output| {
+                        let mut toplevel = true;
+                        if let Some(l) = output.pop() {
+                            if l == '\x02' {
+                                toplevel = false
+                            } else {
+                                output.push(l)
+                            }
+                        }
+                        Some(PathOrigin {
+                                 attr: attr,
+                                 output: output,
+                                 toplevel: toplevel,
+                             })
+                    })
             })
-        })
     }
 }
 
@@ -120,25 +137,30 @@ impl StorePath {
     /// not check the length of the hash).
     pub fn parse(origin: PathOrigin, path: &str) -> Option<StorePath> {
         let mut parts = path.splitn(2, '-');
-        parts.next().and_then(|prefix| {
-            parts.next().and_then(|name| {
-                let mut iter = prefix.rsplitn(2, '/');
-                iter.next().map(|hash| {
-                    let store_dir = iter.next().unwrap_or("");
-                    StorePath {
-                        store_dir: store_dir.to_string(),
-                        hash: hash.to_string(),
-                        name: name.to_string(),
-                        origin: origin,
-                    }
-                })
+        parts
+            .next()
+            .and_then(|prefix| {
+                parts
+                    .next()
+                    .and_then(|name| {
+                        let mut iter = prefix.rsplitn(2, '/');
+                        iter.next()
+                            .map(|hash| {
+                                let store_dir = iter.next().unwrap_or("");
+                                StorePath {
+                                    store_dir: store_dir.to_string(),
+                                    hash: hash.to_string(),
+                                    name: name.to_string(),
+                                    origin: origin,
+                                }
+                            })
+                    })
             })
-        })
     }
-    
+
     /// Encodes a store path as a sequence of bytes, so that it can be decoded with `decode`.
     ///
-    /// The encoding does not use the bytes `0x00` nor `0x01`, as long as none of the fields of 
+    /// The encoding does not use the bytes `0x00` nor `0x01`, as long as none of the fields of
     /// this path contain those bytes (this includes `store_dir`, `hash`, `name` and `origin`).
     /// This is important since it allows the result to be encoded with [frcode](mod.frcode.html).
     ///
@@ -156,11 +178,15 @@ impl StorePath {
 
     pub fn decode(buf: &[u8]) -> Option<StorePath> {
         let mut parts = buf.splitn(2, |c| *c == b'\n');
-        parts.next().and_then(|v| str::from_utf8(v).ok()).and_then(|path| {
-            parts.next().and_then(PathOrigin::decode).and_then(|origin| {
-                StorePath::parse(origin, path)
-            })
-        })
+        parts
+            .next()
+            .and_then(|v| str::from_utf8(v).ok())
+            .and_then(|path| {
+                          parts
+                              .next()
+                              .and_then(PathOrigin::decode)
+                              .and_then(|origin| StorePath::parse(origin, path))
+                      })
     }
 
     /// Returns the name of the store path, which is the part of the file name that
@@ -175,7 +201,9 @@ impl StorePath {
     /// let store_path = StorePath::parse(origin, "/nix/store/010yd8jls8w4vcnql4zhjbnyp2yay5pl-bash-4.4-p5").unwrap();
     /// assert_eq!(&store_path.name(), "bash-4.4-p5");
     /// ```
-    pub fn name(&self) -> Cow<str> { Cow::Borrowed(&self.name) }
+    pub fn name(&self) -> Cow<str> {
+        Cow::Borrowed(&self.name)
+    }
 
     /// The hash of the store path. This is the part just before the name of
     /// the path.
@@ -189,7 +217,9 @@ impl StorePath {
     /// let store_path = StorePath::parse(origin, "/nix/store/010yd8jls8w4vcnql4zhjbnyp2yay5pl-bash-4.4-p5").unwrap();
     /// assert_eq!(&store_path.name(), "bash-4.4-p5");
     /// ```
-    pub fn hash(&self) -> Cow<str> { Cow::Borrowed(&self.hash) }
+    pub fn hash(&self) -> Cow<str> {
+        Cow::Borrowed(&self.hash)
+    }
 
     /// The store dir for which this store path was built.
     ///
@@ -205,7 +235,9 @@ impl StorePath {
     /// let store_path = StorePath::parse(origin, "/nix/store/010yd8jls8w4vcnql4zhjbnyp2yay5pl-bash-4.4-p5").unwrap();
     /// assert_eq!(&store_path.store_dir(), "/nix/store");
     /// ```
-    pub fn store_dir(&self) -> Cow<str> { Cow::Borrowed(&self.store_dir) }
+    pub fn store_dir(&self) -> Cow<str> {
+        Cow::Borrowed(&self.store_dir)
+    }
 
     /// Converts the store path back into an absolute path.
     ///
@@ -235,5 +267,7 @@ impl StorePath {
     /// let store_path = StorePath::parse(origin.clone(), "/nix/store/010yd8jls8w4vcnql4zhjbnyp2yay5pl-bash-4.4-p5").unwrap();
     /// assert_eq!(store_path.origin().as_ref(), &origin);
     /// ```
-    pub fn origin(&self) -> Cow<PathOrigin> { Cow::Borrowed(&self.origin) }
+    pub fn origin(&self) -> Cow<PathOrigin> {
+        Cow::Borrowed(&self.origin)
+    }
 }

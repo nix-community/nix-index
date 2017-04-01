@@ -1,4 +1,5 @@
-#[macro_use] extern crate clap;
+#[macro_use]
+extern crate clap;
 extern crate bincode;
 extern crate futures;
 extern crate nix_index;
@@ -13,27 +14,27 @@ extern crate xdg;
 use futures::future;
 use futures::{Future, Stream, IntoFuture};
 use std::fmt;
-use std::fs::{File};
+use std::fs::File;
 use std::io::{self, Write};
-use std::path::{PathBuf};
+use std::path::PathBuf;
 use std::process;
-use std::str::{self};
-use std::iter::{FromIterator};
-use std::time::{Duration};
-use tokio_core::reactor::{Core};
+use std::str;
+use std::iter::FromIterator;
+use std::time::Duration;
+use tokio_core::reactor::Core;
 use tokio_curl::Session;
 use tokio_retry::{RetryStrategy, RetryError, RetryFuture};
-use tokio_retry::strategies::{FixedInterval};
-use tokio_timer::{Timer};
+use tokio_retry::strategies::FixedInterval;
+use tokio_timer::Timer;
 use separator::Separatable;
 use clap::{Arg, App, ArgMatches};
-use void::{ResultVoidExt};
+use void::ResultVoidExt;
 
 use nix_index::database;
-use nix_index::files::{FileTree};
+use nix_index::files::FileTree;
 use nix_index::hydra;
-use nix_index::package::{StorePath};
-use nix_index::nixpkgs::{self};
+use nix_index::package::StorePath;
+use nix_index::nixpkgs;
 use nix_index::util;
 use nix_index::workset::{WorkSet, WorkSetWatch};
 
@@ -49,34 +50,48 @@ enum Error {
 }
 
 impl From<io::Error> for Error {
-    fn from(err: io::Error) -> Self { Error::Io(err) }
+    fn from(err: io::Error) -> Self {
+        Error::Io(err)
+    }
 }
 
 impl From<nixpkgs::Error> for Error {
-    fn from(err: nixpkgs::Error) -> Self { Error::QueryPackages(err) }
+    fn from(err: nixpkgs::Error) -> Self {
+        Error::QueryPackages(err)
+    }
 }
 
 impl From<bincode::Error> for Error {
-    fn from(err: bincode::Error) -> Self { Error::Serialize(err) }
+    fn from(err: bincode::Error) -> Self {
+        Error::Serialize(err)
+    }
 }
 
 impl From<clap::Error> for Error {
-    fn from(err: clap::Error) -> Self { Error::Args(err) }
+    fn from(err: clap::Error) -> Self {
+        Error::Args(err)
+    }
 }
 
 
 impl fmt::Display for Error {
-    fn fmt(&self, f: &mut fmt::Formatter) -> Result<(), fmt::Error>{
+    fn fmt(&self, f: &mut fmt::Formatter) -> Result<(), fmt::Error> {
         use Error::*;
         match *self {
             Io(ref e) => write!(f, "input/output error: {}", e),
             QueryPackages(ref e) => write!(f, "error while querying available packages: {}", e),
             FetchFiles(ref path, ref e) => {
-                write!(f, "error while fetching the file listing for path {}: {}", path.as_str(), e)
-            },
+                write!(f,
+                       "error while fetching the file listing for path {}: {}",
+                       path.as_str(),
+                       e)
+            }
             FetchReferences(ref path, ref e) => {
-                write!(f, "error while fetching references for path {}: {}", path.as_str(), e)
-            },
+                write!(f,
+                       "error while fetching references for path {}: {}",
+                       path.as_str(),
+                       e)
+            }
             Serialize(ref e) => write!(f, "failed to serialize output: {}", e),
             Args(ref e) => write!(f, "{}", e),
         }
@@ -90,16 +105,17 @@ struct Fetcher<'a, S> {
     jobs: usize,
 }
 
-impl<'a, S> Fetcher<'a, S> where
-    S: Clone + RetryStrategy,
+impl<'a, S> Fetcher<'a, S>
+    where S: Clone + RetryStrategy
 {
     fn retry<F: FnMut() -> A, A: IntoFuture>(&self, f: F) -> RetryFuture<S, A, F> {
         self.retry_strategy.clone().run(self.timer.clone(), f)
     }
 
-    fn try_fetch_files(&'a self, path: StorePath) ->
-        Box<Future<Item=(StorePath, Option<FileTree>), Error=Error> + 'a>
-    {
+    fn try_fetch_files(
+        &'a self,
+        path: StorePath,
+    ) -> Box<Future<Item = (StorePath, Option<FileTree>), Error = Error> + 'a> {
         let fetch_output = {
             util::future_result(|| -> Result<_, Error> {
                 let fetch = {
@@ -107,10 +123,12 @@ impl<'a, S> Fetcher<'a, S> where
                     self.retry(move || hydra::fetch_files(CACHE_URL, self.session, &path))
                 };
 
-                Ok(fetch.then(move |r| future::result(match r {
-                    Err(e) => Err(Error::FetchFiles(path, e)),
-                    Ok(files) => Ok((path, files)),
-                })))
+                Ok(fetch.then(move |r| {
+                                  future::result(match r {
+                                                     Err(e) => Err(Error::FetchFiles(path, e)),
+                                                     Ok(files) => Ok((path, files)),
+                                                 })
+                              }))
             })
         };
 
@@ -118,10 +136,14 @@ impl<'a, S> Fetcher<'a, S> where
     }
 
 
-    fn try_fetch_references(&'a self, starting_set: Vec<StorePath>) ->
-        (Box<Stream<Item=StorePath, Error=Error> + 'a>, WorkSetWatch)
-    {
-        let workset = WorkSet::from_iter(starting_set.into_iter().map(|x| (x.hash().into_owned(), x)));
+    fn try_fetch_references
+        (
+        &'a self,
+        starting_set: Vec<StorePath>,
+    ) -> (Box<Stream<Item = StorePath, Error = Error> + 'a>, WorkSetWatch) {
+        let workset = WorkSet::from_iter(starting_set
+                                             .into_iter()
+                                             .map(|x| (x.hash().into_owned(), x)));
         let watch = workset.watch();
 
         let stream = workset
@@ -129,19 +151,23 @@ impl<'a, S> Fetcher<'a, S> where
             .map(move |(mut handle, path)| {
                 let fetch = {
                     let path = path.clone();
-                    self.retry(move || hydra::fetch_references(CACHE_URL, self.session, path.clone()))
+                    self.retry(move || {
+                                   hydra::fetch_references(CACHE_URL, self.session, path.clone())
+                               })
                 };
 
-                fetch.then(move |e| future::result(match e {
-                    Err(e) => Err(Error::FetchReferences(path, e)),
-                    Ok((path, references)) =>  {
+                fetch.then(move |e| {
+                    future::result(match e {
+                                       Err(e) => Err(Error::FetchReferences(path, e)),
+                                       Ok((path, references)) => {
                         for reference in references {
                             let hash = reference.hash().into_owned();
                             handle.add_work(hash, reference);
                         }
                         Ok(path)
                     }
-                }))
+                                   })
+                })
             })
             .buffer_unordered(self.jobs);
 
@@ -149,11 +175,10 @@ impl<'a, S> Fetcher<'a, S> where
     }
 }
 
-type PackageStream = (Box<Stream<Item=(StorePath, Option<FileTree>), Error=Error>>, WorkSetWatch);
+type PackageStream = (Box<Stream<Item = (StorePath, Option<FileTree>), Error = Error>>,
+                      WorkSetWatch);
 
-fn try_load_paths_cache() ->
-    Result<Option<PackageStream>, Error>
-{
+fn try_load_paths_cache() -> Result<Option<PackageStream>, Error> {
     let file = match File::open("paths.cache") {
         Ok(file) => file,
         Err(ref e) if e.kind() == io::ErrorKind::NotFound => return Ok(None),
@@ -161,13 +186,18 @@ fn try_load_paths_cache() ->
     };
 
     let mut input = io::BufReader::new(file);
-    let fetched: Vec<(StorePath, FileTree)> = bincode::deserialize_from(&mut input, bincode::Infinite)?;
-    let workset = WorkSet::from_iter(fetched.into_iter().map(|(path, tree)| (path.hash().to_string(), (path, Some(tree)))));
+    let fetched: Vec<(StorePath, FileTree)> = bincode::deserialize_from(&mut input,
+                                                                        bincode::Infinite)?;
+    let workset = WorkSet::from_iter(fetched
+                                         .into_iter()
+                                         .map(|(path, tree)| {
+                                                  (path.hash().to_string(), (path, Some(tree)))
+                                              }));
     let watch = workset.watch();
     let stream = workset.then(|r| {
-        let (_handle, v) = r.void_unwrap();
-        future::ok(v)
-    });
+                                  let (_handle, v) = r.void_unwrap();
+                                  future::ok(v)
+                              });
 
     Ok(Some((Box::new(stream), watch)))
 }
@@ -182,19 +212,22 @@ struct Args {
 
 fn update_index(args: &Args, lp: &mut Core, session: &Session) -> Result<(), Error> {
     writeln!(io::stderr(), "+ querying available packages")?;
-    let paths: Vec<StorePath> = nixpkgs::query_packages(&args.nixpkgs)?.collect::<Result<_, _>>()?;
+    let paths: Vec<StorePath> = nixpkgs::query_packages(&args.nixpkgs)?
+        .collect::<Result<_, _>>()?;
 
     let fetcher = Fetcher {
         session: session,
         timer: Timer::default(),
-        retry_strategy: FixedInterval::new(Duration::from_millis(100)).jitter().limit_retries(5),
+        retry_strategy: FixedInterval::new(Duration::from_millis(100))
+            .jitter()
+            .limit_retries(5),
         jobs: args.jobs,
     };
 
     let (requests, watch) = fetcher.try_fetch_references(paths.clone());
-    let requests = Box::new(requests.map(|path| {
-        fetcher.try_fetch_files(path)
-    }).buffer_unordered(args.jobs));
+    let requests = Box::new(requests
+                                .map(|path| fetcher.try_fetch_files(path))
+                                .buffer_unordered(args.jobs));
 
     let cached = if args.path_cache {
         try_load_paths_cache()?
@@ -230,15 +263,15 @@ fn update_index(args: &Args, lp: &mut Core, session: &Session) -> Result<(), Err
 
     let mut results: Vec<(StorePath, FileTree)> = Vec::new();
     lp.run(requests.for_each(|entry| {
-        if args.path_cache {
-            results.push(entry.clone());
-        }
-        let mut process = |(path, files)| -> Result<_, Error> {
-            db.add(path, files)?;
-            Ok(())
-        };
-        future::result(process(entry))
-    }))?;
+            if args.path_cache {
+                results.push(entry.clone());
+            }
+            let mut process = |(path, files)| -> Result<_, Error> {
+                db.add(path, files)?;
+                Ok(())
+            };
+            future::result(process(entry))
+        }))?;
     writeln!(&mut io::stderr(), "")?;
 
     if args.path_cache {
@@ -248,7 +281,9 @@ fn update_index(args: &Args, lp: &mut Core, session: &Session) -> Result<(), Err
     }
 
     let index_size = db.finish()?;
-    writeln!(io::stderr(), "+ wrote index of {} bytes", index_size.separated_string())?;
+    writeln!(io::stderr(),
+             "+ wrote index of {} bytes",
+             index_size.separated_string())?;
 
     Ok(())
 }
@@ -257,12 +292,15 @@ fn run<'a>(matches: &ArgMatches<'a>, lp: &mut Core, session: &Session) -> Result
     let args = Args {
         jobs: value_t!(matches.value_of("requests"), usize)?,
         database: PathBuf::from(matches.value_of("database").unwrap()),
-        nixpkgs: matches.value_of("nixpkgs").expect("nixpkgs arg required").to_string(),
+        nixpkgs: matches
+            .value_of("nixpkgs")
+            .expect("nixpkgs arg required")
+            .to_string(),
         compression_level: value_t!(matches.value_of("level"), i32)?,
         path_cache: matches.is_present("pathcache"),
     };
 
-    
+
     update_index(&args, lp, session)
 }
 
@@ -308,10 +346,11 @@ fn main() {
         .get_matches();
 
     run(&matches, &mut lp, &session).unwrap_or_else(|e| {
-        if let Error::Args(e) = e {
-            e.exit()
-        }
-        writeln!(&mut io::stderr(), "{}", e).unwrap();
-        process::exit(2);
-    });
+                                                        if let Error::Args(e) = e {
+                                                            e.exit()
+                                                        }
+                                                        writeln!(&mut io::stderr(), "{}", e)
+                                                            .unwrap();
+                                                        process::exit(2);
+                                                    });
 }

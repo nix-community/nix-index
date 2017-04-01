@@ -1,10 +1,10 @@
 //! Small but reusable helper functions.
 use std::io::{self, Write};
-use std::path::{PathBuf};
-use std::fs::{OpenOptions};
+use std::path::PathBuf;
+use std::fs::OpenOptions;
 use std::env;
 
-use futures::{IntoFuture};
+use futures::IntoFuture;
 use futures::future::{self, Either, FutureResult};
 
 /// Writes a file to the temp directory with a name that is made of the supplied
@@ -27,12 +27,12 @@ pub fn write_temp_file(base_name: &str, contents: &[u8]) -> Option<PathBuf> {
             .open(&this_path);
         match temp_file {
             Ok(mut file) => {
-                path = file.write_all(contents).map(|_| { this_path }).ok();
-                break
-            },
+                path = file.write_all(contents).map(|_| this_path).ok();
+                break;
+            }
             Err(e) => {
                 if e.kind() != io::ErrorKind::AlreadyExists {
-                    break
+                    break;
                 }
             }
         }
@@ -60,12 +60,12 @@ pub fn write_temp_file(base_name: &str, contents: &[u8]) -> Option<PathBuf> {
 ///          Ok(future::ok(value))
 ///     }))
 /// }
-/// 
+///
 /// # fn main() {}
 /// ```
 pub fn future_result<F, A>(f: F) -> Either<A::Future, FutureResult<A::Item, A::Error>>
     where A: IntoFuture,
-          F: FnOnce() -> Result<A, A::Error>,
+          F: FnOnce() -> Result<A, A::Error>
 {
     match f() {
         Ok(v) => Either::A(v.into_future()),

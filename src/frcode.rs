@@ -9,17 +9,16 @@ pub enum Error {
         previous_len: usize,
         shared_len: isize,
     },
-    SharedOverflow {
-        shared_len: isize,
-        diff: isize,
-    },
+    SharedOverflow { shared_len: isize, diff: isize },
     MissingNul,
     MissingNewline,
     Io(io::Error),
 }
 
 impl From<io::Error> for Error {
-    fn from(err: io::Error) -> Error { Error::Io(err) }
+    fn from(err: io::Error) -> Error {
+        Error::Io(err)
+    }
 }
 
 impl fmt::Display for Error {
@@ -27,14 +26,23 @@ impl fmt::Display for Error {
         use self::Error::*;
         match *self {
             Io(ref e) => write!(f, "{}", e),
-            SharedOutOfRange { previous_len, shared_len } =>
-                write!(f, "length of shared prefix out of bounds [0, {}): {}", previous_len, shared_len),
-            SharedOverflow { shared_len, diff } =>
-                write!(f, "cannot add {} to shared prefix length {}: overflow", diff, shared_len),
-            MissingNul =>
-                write!(f, "entry missing terminal NUL byte"),
-            MissingNewline =>
-                write!(f, "entry missing terminating newline"),
+            SharedOutOfRange {
+                previous_len,
+                shared_len,
+            } => {
+                write!(f,
+                       "length of shared prefix out of bounds [0, {}): {}",
+                       previous_len,
+                       shared_len)
+            }
+            SharedOverflow { shared_len, diff } => {
+                write!(f,
+                       "cannot add {} to shared prefix length {}: overflow",
+                       diff,
+                       shared_len)
+            }
+            MissingNul => write!(f, "entry missing terminal NUL byte"),
+            MissingNewline => write!(f, "entry missing terminating newline"),
         }
     }
 }
@@ -53,11 +61,11 @@ impl ResizableBuf {
     }
     fn resize(&mut self, new_size: usize) -> bool {
         if new_size <= self.data.len() {
-            return true
+            return true;
         }
 
         if !self.allow_resize {
-            return false
+            return false;
         }
 
         self.data.resize(new_size, b'\0');
@@ -108,20 +116,20 @@ impl<R: BufRead> Decoder<R> {
         }
     }
 
-    fn copy_shared(&mut self) -> Result<bool, Error>  {
+    fn copy_shared(&mut self) -> Result<bool, Error> {
         let shared_len = self.shared_len as usize;
         let new_pos = self.pos + shared_len;
         let new_last_path = self.pos;
         if !self.buf.resize(new_pos) {
-            return Ok(false)
+            return Ok(false);
         }
 
 
         if self.shared_len < 0 || self.last_path + shared_len > self.pos {
             return Err(Error::SharedOutOfRange {
-                previous_len: self.pos - self.last_path,
-                shared_len: self.shared_len,
-            })
+                           previous_len: self.pos - self.last_path,
+                           shared_len: self.shared_len,
+                       });
         }
 
         let (_, last) = self.buf.split_at_mut(self.last_path);
@@ -136,11 +144,16 @@ impl<R: BufRead> Decoder<R> {
     fn read_to_nul(&mut self) -> Result<bool, Error> {
         loop {
             let (done, len) = {
-                let &mut Decoder { ref mut reader, ref mut buf, ref mut pos, ..} = self;
+                let &mut Decoder {
+                             ref mut reader,
+                             ref mut buf,
+                             ref mut pos,
+                             ..
+                         } = self;
                 let input = match reader.fill_buf() {
                     Ok(data) => data,
                     Err(ref e) if e.kind() == io::ErrorKind::Interrupted => continue,
-                    Err(e) => return Err(Error::from(e))
+                    Err(e) => return Err(Error::from(e)),
                 };
 
                 if input.is_empty() {
@@ -150,7 +163,7 @@ impl<R: BufRead> Decoder<R> {
 
                 let (done, len) = match memchr::memchr(b'\0', input) {
                     Some(i) => (true, i + 1),
-                    None => (false, input.len())
+                    None => (false, input.len()),
                 };
 
                 let new_pos = *pos + len;
@@ -158,14 +171,13 @@ impl<R: BufRead> Decoder<R> {
                     buf[*pos..new_pos].copy_from_slice(&input[..len]);
                     *pos = new_pos;
                     (done, len)
-                }
-                else {
-                    return Ok(false)
+                } else {
+                    return Ok(false);
                 }
             };
             self.reader.consume(len);
             if done {
-                return Ok(true)
+                return Ok(true);
             }
 
         }
@@ -174,7 +186,7 @@ impl<R: BufRead> Decoder<R> {
     fn decode_prefix_diff(&mut self) -> Result<i16, Error> {
         let mut buf = [0; 1];
         self.reader.read_exact(&mut buf)?;
-        
+
         if buf[0] != 0x80 {
             Ok((buf[0] as i8) as i16)
         } else {
@@ -189,7 +201,7 @@ impl<R: BufRead> Decoder<R> {
     pub fn decode(&mut self) -> Result<&mut [u8], Error> {
         // If we found the end of the file, return an empty slice.
         if self.eof {
-            return Ok(&mut [])
+            return Ok(&mut []);
         }
 
         // save end pointer from previous iteration and reset write position
@@ -223,27 +235,32 @@ impl<R: BufRead> Decoder<R> {
         loop {
             // Read data up to the next nul byte.
             if !self.read_to_nul()? {
-                break
+                break;
             }
 
             // Parse the next prefix length difference
             let diff = self.decode_prefix_diff()? as isize;
 
             // Update the shared len
-            self.shared_len = self.shared_len.checked_add(diff).ok_or_else(|| {
-                Error::SharedOverflow {
-                    shared_len: self.shared_len,
-                    diff: diff,
-                }
-            })?;
+            self.shared_len = self.shared_len
+                .checked_add(diff)
+                .ok_or_else(|| {
+                                Error::SharedOverflow {
+                                    shared_len: self.shared_len,
+                                    diff: diff,
+                                }
+                            })?;
 
             // Copy the shared prefix
-            if !self.copy_shared()? { break }
+            if !self.copy_shared()? {
+                break;
+            }
             self.buf.allow_resize = false;
         }
 
         // Find end of last item
-        self.partial_item_start = memchr::memrchr(b'\n', &self.buf[..self.pos]).ok_or(Error::MissingNewline)? + 1;
+        self.partial_item_start =
+            memchr::memrchr(b'\n', &self.buf[..self.pos]).ok_or(Error::MissingNewline)? + 1;
         Ok(&mut self.buf[item_start..self.partial_item_start])
     }
 }
@@ -265,8 +282,10 @@ impl<W: Write> Drop for Encoder<W> {
 
 impl<W: Write> Encoder<W> {
     pub fn new(writer: W, footer_meta: Vec<u8>, footer_path: Vec<u8>) -> Encoder<W> {
-        assert!(!footer_meta.contains(&b'\x00'), "footer meta must not contain null bytes");
-        assert!(!footer_path.contains(&b'\x00'), "footer path must not contain null bytes");
+        assert!(!footer_meta.contains(&b'\x00'),
+                "footer meta must not contain null bytes");
+        assert!(!footer_path.contains(&b'\x00'),
+                "footer path must not contain null bytes");
         Encoder {
             writer: writer,
             last: Vec::new(),
@@ -289,7 +308,8 @@ impl<W: Write> Encoder<W> {
     }
 
     pub fn write_meta(&mut self, meta: &[u8]) -> io::Result<()> {
-        assert!(!meta.contains(&b'\x00'), "entry must not contain null bytes");
+        assert!(!meta.contains(&b'\x00'),
+                "entry must not contain null bytes");
 
         self.writer.write_all(meta)?;
         Ok(())
@@ -301,7 +321,9 @@ impl<W: Write> Encoder<W> {
         let mut shared: isize = 0;
         let max_shared = i16::max_value() as isize;
         for (a, b) in self.last.iter().zip(path.iter()) {
-            if a != b || shared > max_shared { break }
+            if a != b || shared > max_shared {
+                break;
+            }
             shared += 1;
         }
         let shared = shared as i16;
@@ -321,10 +343,10 @@ impl<W: Write> Encoder<W> {
 
     fn write_footer(&mut self) -> io::Result<()> {
         if self.footer_written {
-            return Ok(())
+            return Ok(());
         }
 
-        let diff = - self.shared_len;
+        let diff = -self.shared_len;
         self.writer.write_all(&self.footer_meta)?;
         self.writer.write_all(b"\x00")?;
         self.encode_diff(diff)?;
