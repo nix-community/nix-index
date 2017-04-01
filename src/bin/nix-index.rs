@@ -14,7 +14,7 @@ extern crate xdg;
 use futures::future;
 use futures::{Future, Stream, IntoFuture};
 use std::fmt;
-use std::fs::File;
+use std::fs::{self, File};
 use std::io::{self, Write};
 use std::path::PathBuf;
 use std::process;
@@ -218,7 +218,7 @@ fn update_index(args: &Args, lp: &mut Core, session: &Session) -> Result<(), Err
     let fetcher = Fetcher {
         session: session,
         timer: Timer::default(),
-        retry_strategy: FixedInterval::new(Duration::from_millis(100))
+        retry_strategy: FixedInterval::new(Duration::from_millis(500))
             .jitter()
             .limit_retries(5),
         jobs: args.jobs,
@@ -259,6 +259,7 @@ fn update_index(args: &Args, lp: &mut Core, session: &Session) -> Result<(), Err
 
     write!(io::stderr(), "+ generating index\r")?;
 
+    fs::create_dir_all(&args.database)?;
     let mut db = database::Writer::create(args.database.join("files.zst"), args.compression_level)?;
 
     let mut results: Vec<(StorePath, FileTree)> = Vec::new();
