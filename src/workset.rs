@@ -19,7 +19,7 @@
 //!
 //! use futures::{Stream};
 //! use nix_index::workset::{WorkSet};
-//! use std::iter;
+//! use std::iter::{self, FromIterator};
 //!
 //! #[derive(Clone)]
 //! struct Package {
