@@ -25,15 +25,15 @@ impl From<io::Error> for Error {
 impl fmt::Display for Error {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         use self::Error::*;
-        match self {
-            &Io(ref e) => write!(f, "{}", e),
-            &SharedOutOfRange { previous_len, shared_len } =>
+        match *self {
+            Io(ref e) => write!(f, "{}", e),
+            SharedOutOfRange { previous_len, shared_len } =>
                 write!(f, "length of shared prefix out of bounds [0, {}): {}", previous_len, shared_len),
-            &SharedOverflow { shared_len, diff } =>
+            SharedOverflow { shared_len, diff } =>
                 write!(f, "cannot add {} to shared prefix length {}: overflow", diff, shared_len),
-            &MissingNul =>
+            MissingNul =>
                 write!(f, "entry missing terminal NUL byte"),
-            &MissingNewline =>
+            MissingNewline =>
                 write!(f, "entry missing terminating newline"),
         }
     }
@@ -61,7 +61,7 @@ impl ResizableBuf {
         }
 
         self.data.resize(new_size, b'\0');
-        return true
+        true
     }
 }
 
@@ -130,7 +130,7 @@ impl<R: BufRead> Decoder<R> {
 
         self.pos += shared_len;
         self.last_path = new_last_path;
-        return Ok(true);
+        Ok(true)
     }
 
     fn read_to_nul(&mut self) -> Result<bool, Error> {
@@ -143,7 +143,7 @@ impl<R: BufRead> Decoder<R> {
                     Err(e) => return Err(Error::from(e))
                 };
 
-                if input.len() == 0 {
+                if input.is_empty() {
                     self.eof = true;
                     return Ok(false);
                 }
@@ -244,7 +244,7 @@ impl<R: BufRead> Decoder<R> {
 
         // Find end of last item
         self.partial_item_start = memchr::memrchr(b'\n', &self.buf[..self.pos]).ok_or(Error::MissingNewline)? + 1;
-        return Ok(&mut self.buf[item_start..self.partial_item_start]);
+        Ok(&mut self.buf[item_start..self.partial_item_start])
     }
 }
 
@@ -319,7 +319,7 @@ impl<W: Write> Encoder<W> {
         Ok(())
     }
 
-    fn write_footer<'a>(&mut self) -> io::Result<()> {
+    fn write_footer(&mut self) -> io::Result<()> {
         if self.footer_written {
             return Ok(())
         }

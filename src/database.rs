@@ -74,15 +74,15 @@ const FILE_MAGIC: &'static [u8] = b"NIXI";
 impl fmt::Display for Error {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         use self::Error::*;
-        match self {
-            &Io(ref e) => write!(f, "i/o error: {}", e),
-            &Frcode(ref e) => write!(f, "frcode format error: {}", e),
-            &MissingFileMeta(ref e) => write!(f, "format error, file without meta information: {}", String::from_utf8_lossy(e)),
-            &EntryParseFailed(ref e) => write!(f, "failed to parse entry. raw entry: {}", String::from_utf8_lossy(e)),
-            &StorePathParseFailed(ref e) => write!(f, "failed to parse store path. raw bytes: {}", String::from_utf8_lossy(e)),
-            &MissingPackageEntry => write!(f, "format error, found a file entry without matching package entry"),
-            &UnsupportedVersion(v) => write!(f, "this executable only supports the nix-index database version {}, but found a database with version {}", FORMAT_VERSION, v),
-            &UnsupportedFileType => write!(f, "the file is not a nix-index database")
+        match *self {
+            Io(ref e) => write!(f, "i/o error: {}", e),
+            Frcode(ref e) => write!(f, "frcode format error: {}", e),
+            MissingFileMeta(ref e) => write!(f, "format error, file without meta information: {}", String::from_utf8_lossy(e)),
+            EntryParseFailed(ref e) => write!(f, "failed to parse entry. raw entry: {}", String::from_utf8_lossy(e)),
+            StorePathParseFailed(ref e) => write!(f, "failed to parse store path. raw bytes: {}", String::from_utf8_lossy(e)),
+            MissingPackageEntry => write!(f, "format error, found a file entry without matching package entry"),
+            UnsupportedVersion(v) => write!(f, "this executable only supports the nix-index database version {}, but found a database with version {}", FORMAT_VERSION, v),
+            UnsupportedFileType => write!(f, "the file is not a nix-index database")
         }
     }
 }

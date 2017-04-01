@@ -44,7 +44,7 @@ pub fn fetch_files<'a>(cache_url: &str, session: &'a Session, path: &StorePath) 
 
         let sink = buffer.clone();
         req.write_function(move |data| {
-            sink.lock().unwrap().write(data).unwrap();
+            sink.lock().unwrap().write_all(data).unwrap();
             Ok(data.len())
         })?;
 
@@ -145,21 +145,21 @@ impl Deserialize for HydraFileListing {
                     }
                 }
 
-                let typ = &try!(typ.ok_or(serde::de::Error::missing_field("type"))) as &[u8];
+                let typ = &try!(typ.ok_or_else(|| serde::de::Error::missing_field("type"))) as &[u8];
 
                 match typ {
                     b"regular" => {
-                        let size = size.ok_or(serde::de::Error::missing_field("size"))?;
+                        let size = size.ok_or_else(|| serde::de::Error::missing_field("size"))?;
                         let executable = executable.unwrap_or(false);
                         Ok(FileTree::regular(size, executable))
                     },
                     b"directory" => {
-                        let entries = entries.ok_or(serde::de::Error::missing_field("entries"))?;
+                        let entries = entries.ok_or_else(|| serde::de::Error::missing_field("entries"))?;
                         let entries = entries.into_iter().map(|(k, v)| (k, v.0)).collect();
                         Ok(FileTree::directory(entries))
                     },
                     b"symlink" => {
-                        let target = target.ok_or(serde::de::Error::missing_field("target"))?;
+                        let target = target.ok_or_else(|| serde::de::Error::missing_field("target"))?;
                         Ok(FileTree::symlink(target))
                     },
                     _ => {
@@ -168,7 +168,7 @@ impl Deserialize for HydraFileListing {
                 }
             }
         }
-        d.deserialize_map(Root).map(|f| HydraFileListing(f) )
+        d.deserialize_map(Root).map(HydraFileListing)
     }
 }
 
@@ -192,21 +192,21 @@ impl From<curl::Error> for Error {
 impl fmt::Display for Error {
     fn fmt(&self, f: &mut fmt::Formatter) -> Result<(), fmt::Error>{
         use self::Error::*;
-        match self {
-            &Io(ref e) => write!(f, "input/output error: {}", e),
-            &Curl(ref e) => write!(f, "curl error: {}", e),
-            &Http(ref url, c) => write!(f, "error while fetching {}: http code {}", url, c),
-            &Parse(ref url, ref e, ref contents) => {
+        match *self {
+            Io(ref e) => write!(f, "input/output error: {}", e),
+            Curl(ref e) => write!(f, "curl error: {}", e),
+            Http(ref url, c) => write!(f, "error while fetching {}: http code {}", url, c),
+            Parse(ref url, ref e, ref contents) => {
                 write!(f, "failed to parse file listing {}: {}", url, e)?;
-                if let &Some(ref p) = contents {
+                if let Some(ref p) = *contents {
                     write!(f, "\nresponse written to {}", p.to_string_lossy())?
                 }
                 Ok(())
             },
-            &InvalidStorePath(ref s) => {
+            InvalidStorePath(ref s) => {
                 write!(f, "failed to parse store path, must match format $(NIX_STORE_DIR)$(HASH)-name: {}", s)
             },
-            &InvalidUnicode(ref bytes, ref e) => {
+            InvalidUnicode(ref bytes, ref e) => {
                 write!(f, "invalid unicode byte {}: {}", bytes[e.valid_up_to()], e)
             }
         }
@@ -227,7 +227,7 @@ pub fn fetch_references<'a>(cache_url: &str, session: &'a Session, mut path: Sto
 
         let sink = buffer.clone();
         req.write_function(move |data| {
-            sink.lock().unwrap().write(data).unwrap();
+            sink.lock().unwrap().write_all(data).unwrap();
             Ok(data.len())
         })?;
 
@@ -253,7 +253,7 @@ pub fn fetch_references<'a>(cache_url: &str, session: &'a Session, mut path: Sto
                     let line = str::from_utf8(line).map_err(|e| Error::InvalidUnicode(line.to_vec(), e))?;
                     result = line.trim().split_whitespace().map(|new_path| {
                         let new_origin = PathOrigin { toplevel: false, ..path.origin().into_owned() };
-                        StorePath::parse(new_origin, new_path).ok_or(Error::InvalidStorePath(new_path.to_string()))
+                        StorePath::parse(new_origin, new_path).ok_or_else(|| Error::InvalidStorePath(new_path.to_string()))
                     }).collect::<Result<Vec<_>, _>>()?;
                 }
 
@@ -262,7 +262,7 @@ pub fn fetch_references<'a>(cache_url: &str, session: &'a Session, mut path: Sto
                     let line = str::from_utf8(line).map_err(|e| Error::InvalidUnicode(line.to_vec(), e))?;
                     let line = line.trim();
 
-                    path = StorePath::parse(path.origin().into_owned(), line).ok_or(Error::InvalidStorePath(line.to_string()))?;
+                    path = StorePath::parse(path.origin().into_owned(), line).ok_or_else(|| Error::InvalidStorePath(line.to_string()))?;
                 }
             }
 

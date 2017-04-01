@@ -22,8 +22,8 @@ use nix_index::files::{self, FileType, FileTreeEntry};
 
 enum Error {
     Io(io::Error),
-    DatabaseReadError(database::Error),
-    GrepError(grep::Error),
+    DatabaseRead(database::Error),
+    Grep(grep::Error),
     Args(clap::Error),
 }
 
@@ -36,15 +36,15 @@ impl From<clap::Error> for Error {
 }
 
 impl From<database::Error> for Error {
-    fn from(err: database::Error) -> Self { Error::DatabaseReadError(err) }
+    fn from(err: database::Error) -> Self { Error::DatabaseRead(err) }
 }
 
 impl From<grep::Error> for Error {
-    fn from(err: grep::Error) -> Self { Error::GrepError(err) }
+    fn from(err: grep::Error) -> Self { Error::Grep(err) }
 }
 
 impl From<regex::Error> for Error {
-    fn from(err: regex::Error) -> Self { Error::GrepError(grep::Error::Regex(err)) }
+    fn from(err: regex::Error) -> Self { Error::Grep(grep::Error::Regex(err)) }
 }
 
 
@@ -59,7 +59,7 @@ struct Args {
     color: bool,
 }
 
-fn locate(args: Args) -> Result<(), Error> {
+fn locate(args: &Args) -> Result<(), Error> {
     let index_file = args.database.join("files.zst");
     let pattern = GrepBuilder::new(&args.pattern).build()?;
     let name_pattern = if let Some(ref pat) = args.name_pattern {
@@ -72,7 +72,7 @@ fn locate(args: Args) -> Result<(), Error> {
 
     let results = db.find_iter(&pattern).filter(|v| v.as_ref().ok().map_or(true, |v| {
         let &(ref store_path, FileTreeEntry { ref path, ref node }) = v;
-        let m = match pattern.regex().find_iter(&path).last() {
+        let m = match pattern.regex().find_iter(path).last() {
             Some(m) => m,
             None => return false,
         };
@@ -109,7 +109,7 @@ fn locate(args: Args) -> Result<(), Error> {
 
         if args.color {
             let mut prev = 0;
-            for mat in pattern.regex().find_iter(&path.as_bytes()) {
+            for mat in pattern.regex().find_iter(path.as_bytes()) {
                 print!("{}{}", &path[prev..mat.start()], Red.paint(&path[mat.start()..mat.end()]));
                 prev = mat.end();
             }
@@ -122,14 +122,14 @@ fn locate(args: Args) -> Result<(), Error> {
     Ok(())
 }
 
-fn run<'a>(matches: ArgMatches<'a>) -> Result<(), Error> {
+fn run<'a>(matches: &ArgMatches<'a>) -> Result<(), Error> {
     let pattern_arg = matches.value_of("PATTERN").expect("pattern arg required").to_string();
     let name_arg = matches.value_of("name");
     let make_pattern = |s: &str| {
         if matches.is_present("regex") {
             s.to_string()
         } else {
-            regex::escape(&s)
+            regex::escape(s)
         }
     };
     let color = matches.value_of("color").and_then(|x| {
@@ -157,7 +157,7 @@ fn run<'a>(matches: ArgMatches<'a>) -> Result<(), Error> {
         color: color.unwrap_or_else(isatty::stdout_isatty)
     };
 
-    return locate(args);
+    locate(&args)
 }
 
 fn main() {
@@ -221,16 +221,16 @@ fn main() {
         )
         .get_matches();
 
-    run(matches).unwrap_or_else(|e| {
+    run(&matches).unwrap_or_else(|e| {
         use Error::*;
         match e {
             Args(e) => e.exit(),
             Io(e) => writeln!(io::stderr(), "An I/O operation failed: {}", e).unwrap(),
-            DatabaseReadError(e) => {
+            DatabaseRead(e) => {
                 writeln!(io::stderr(),
                          "The database could not be read: {}\n", e).unwrap();
             },
-            GrepError(e) => {
+            Grep(e) => {
                 writeln!(io::stderr(),
                          "Constructing the regex matcher failed with: {}", e).unwrap();
             }

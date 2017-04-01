@@ -161,8 +161,18 @@ impl<K, V> WorkSetObserver for WorkSetObserverImpl<K, V> {
 
 
 impl<K: Hash + Eq + 'static, V: 'static> WorkSet<K, V> {
-    /// Constructs a new work set with the given initial work items.
-    pub fn from_iter<I: Iterator<Item=(K,V)>>(iter: I) -> WorkSet<K, V> {
+
+    /// Returns a watch for this work set that provides status information.
+    pub fn watch(&self) -> WorkSetWatch {
+        Box::new(WorkSetObserverImpl {
+            state: Rc::downgrade(&self.state),
+        })
+    }
+}
+
+/// Constructs a new work set with the given initial work items.
+impl<K: Hash + Eq + 'static, V: 'static> FromIterator<(K,V)> for WorkSet<K, V> where {
+    fn from_iter<I: IntoIterator<Item=(K,V)>>(iter: I) -> WorkSet<K, V> {
         let shared = Shared {
             seen: HashSet::new(),
             queue: OrderMap::from_iter(iter),
@@ -170,13 +180,6 @@ impl<K: Hash + Eq + 'static, V: 'static> WorkSet<K, V> {
         WorkSet {
             state: Rc::new(RefCell::new(shared)),
         }
-    }
-
-    /// Returns a watch for this work set that provides status information.
-    pub fn watch(&self) -> WorkSetWatch {
-        Box::new(WorkSetObserverImpl {
-            state: Rc::downgrade(&self.state),
-        })
     }
 }
 

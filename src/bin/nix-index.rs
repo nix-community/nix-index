@@ -18,6 +18,7 @@ use std::io::{self, Write};
 use std::path::{PathBuf};
 use std::process;
 use std::str::{self};
+use std::iter::{FromIterator};
 use std::time::{Duration};
 use tokio_core::reactor::{Core};
 use tokio_curl::Session;
@@ -67,17 +68,17 @@ impl From<clap::Error> for Error {
 impl fmt::Display for Error {
     fn fmt(&self, f: &mut fmt::Formatter) -> Result<(), fmt::Error>{
         use Error::*;
-        match self {
-            &Io(ref e) => write!(f, "input/output error: {}", e),
-            &QueryPackages(ref e) => write!(f, "error while querying available packages: {}", e),
-            &FetchFiles(ref path, ref e) => {
+        match *self {
+            Io(ref e) => write!(f, "input/output error: {}", e),
+            QueryPackages(ref e) => write!(f, "error while querying available packages: {}", e),
+            FetchFiles(ref path, ref e) => {
                 write!(f, "error while fetching the file listing for path {}: {}", path.as_str(), e)
             },
-            &FetchReferences(ref path, ref e) => {
+            FetchReferences(ref path, ref e) => {
                 write!(f, "error while fetching references for path {}: {}", path.as_str(), e)
             },
-            &Serialize(ref e) => write!(f, "failed to serialize output: {}", e),
-            &Args(ref e) => write!(f, "{}", e),
+            Serialize(ref e) => write!(f, "failed to serialize output: {}", e),
+            Args(ref e) => write!(f, "{}", e),
         }
     }
 }
@@ -148,8 +149,10 @@ impl<'a, S> Fetcher<'a, S> where
     }
 }
 
+type PackageStream = (Box<Stream<Item=(StorePath, Option<FileTree>), Error=Error>>, WorkSetWatch);
+
 fn try_load_paths_cache() ->
-    Result<Option<(Box<Stream<Item=(StorePath, Option<FileTree>), Error=Error>>, WorkSetWatch)>, Error>
+    Result<Option<PackageStream>, Error>
 {
     let file = match File::open("paths.cache") {
         Ok(file) => file,
@@ -177,7 +180,7 @@ struct Args {
     path_cache: bool,
 }
 
-fn update_index(args: Args, lp: &mut Core, session: &Session) -> Result<(), Error> {
+fn update_index(args: &Args, lp: &mut Core, session: &Session) -> Result<(), Error> {
     writeln!(io::stderr(), "+ querying available packages")?;
     let paths: Vec<StorePath> = nixpkgs::query_packages(&args.nixpkgs)?.collect::<Result<_, _>>()?;
 
@@ -250,7 +253,7 @@ fn update_index(args: Args, lp: &mut Core, session: &Session) -> Result<(), Erro
     Ok(())
 }
 
-fn run<'a>(matches: ArgMatches<'a>, lp: &mut Core, session: &Session) -> Result<(), Error> {
+fn run<'a>(matches: &ArgMatches<'a>, lp: &mut Core, session: &Session) -> Result<(), Error> {
     let args = Args {
         jobs: value_t!(matches.value_of("requests"), usize)?,
         database: PathBuf::from(matches.value_of("database").unwrap()),
@@ -260,7 +263,7 @@ fn run<'a>(matches: ArgMatches<'a>, lp: &mut Core, session: &Session) -> Result<
     };
 
     
-    return update_index(args, lp, session);
+    update_index(&args, lp, session)
 }
 
 fn main() {
@@ -304,7 +307,7 @@ fn main() {
                     Note: does not check if the cached data is up to date! Use only for development."))
         .get_matches();
 
-    run(matches, &mut lp, &session).unwrap_or_else(|e| {
+    run(&matches, &mut lp, &session).unwrap_or_else(|e| {
         if let Error::Args(e) = e {
             e.exit()
         }

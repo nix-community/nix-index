@@ -79,20 +79,20 @@ impl<T> FileNode<T> {
     /// if the node was a directory.
     pub fn split_contents(&self) -> (FileNode<()>, Option<&T>) {
         use self::FileNode::*;
-        match self {
-            &Regular { size, executable } => (Regular { size: size, executable: executable }, None),
-            &Symlink { ref target } => (Symlink { target: target.clone() }, None),
-            &Directory { size, ref contents } => (Directory { size: size, contents: () }, Some(contents)),
+        match *self {
+            Regular { size, executable } => (Regular { size: size, executable: executable }, None),
+            Symlink { ref target } => (Symlink { target: target.clone() }, None),
+            Directory { size, ref contents } => (Directory { size: size, contents: () }, Some(contents)),
         }
     }
 
     /// Return the type of this file.
     pub fn get_type(&self) -> FileType {
         use self::{FileNode, FileType};
-        match self {
-            &FileNode::Regular { executable, .. } => FileType::Regular { executable: executable },
-            &FileNode::Directory { .. } => FileType::Directory,
-            &FileNode::Symlink { .. } => FileType::Symlink,
+        match *self {
+            FileNode::Regular { executable, .. } => FileType::Regular { executable: executable },
+            FileNode::Directory { .. } => FileType::Directory,
+            FileNode::Symlink { .. } => FileType::Symlink,
         }
     }
 }
@@ -100,16 +100,16 @@ impl<T> FileNode<T> {
 impl FileNode<()> {
     fn encode<W: Write>(&self, encoder: &mut frcode::Encoder<W>) -> io::Result<()> {
         use self::FileNode::*;
-        match self {
-            &Regular { executable, size } => {
+        match *self {
+            Regular { executable, size } => {
                 let e = if executable { "x" } else { "r" };
                 encoder.write_meta(format!("{}{}", size, e).as_bytes())?;
             }
-            &Symlink { ref target } => {
+            Symlink { ref target } => {
                 encoder.write_meta(target)?;
                 encoder.write_meta(b"s")?;
             },
-            &Directory { size, contents: () }=> {
+            Directory { size, contents: () }=> {
                 encoder.write_meta(format!("{}d", size).as_bytes())?;
             }
         }
@@ -208,7 +208,7 @@ impl FileTree {
                     let mut path = path.clone();
                     path.push(b'/');
                     path.extend_from_slice(name);
-                    stack.push((path, &entry));
+                    stack.push((path, entry));
                 }
             }
             result.push(FileTreeEntry { path: path, node: node });
