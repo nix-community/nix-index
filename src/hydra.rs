@@ -41,6 +41,7 @@ pub fn fetch_files<'a>(
         let mut req = Easy::new();
 
         req.url(&url)?;
+        req.accept_encoding("zlib,identity,gzip")?;
 
         let buffer = Arc::new(Mutex::new(Vec::new()));
 
@@ -248,6 +249,7 @@ pub fn fetch_references<'a>
         let mut req = Easy::new();
 
         req.url(&url)?;
+        req.accept_encoding("zlib,identity,gzip")?;
 
         let buffer = Arc::new(Mutex::new(Vec::new()));
 
