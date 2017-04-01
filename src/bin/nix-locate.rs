@@ -4,6 +4,8 @@ extern crate nix_index;
 extern crate separator;
 extern crate xdg;
 extern crate regex;
+extern crate isatty;
+extern crate ansi_term;
 
 use std::io::{self, Write};
 use std::path::{PathBuf};
@@ -13,6 +15,7 @@ use separator::Separatable;
 use clap::{Arg, App, ArgMatches};
 use grep::{GrepBuilder};
 use regex::{Regex};
+use ansi_term::Colour::Red;
 
 use nix_index::database;
 use nix_index::files::{self, FileType, FileTreeEntry};
@@ -53,6 +56,7 @@ struct Args {
     name_pattern: Option<String>,
     file_type: Vec<FileType>,
     only_toplevel: bool,
+    color: bool,
 }
 
 fn locate(args: Args) -> Result<(), Error> {
@@ -68,7 +72,10 @@ fn locate(args: Args) -> Result<(), Error> {
 
     let results = db.find_iter(&pattern).filter(|v| v.as_ref().ok().map_or(true, |v| {
         let &(ref store_path, FileTreeEntry { ref path, ref node }) = v;
-        let m = pattern.regex().find_iter(&path).last().expect("path matches pattern");
+        let m = match pattern.regex().find_iter(&path).last() {
+            Some(m) => m,
+            None => return false,
+        };
 
         let conditions = [
             !args.group || !path[m.end()..].contains(&b'/'),
@@ -78,9 +85,7 @@ fn locate(args: Args) -> Result<(), Error> {
             args.file_type.iter().any(|t| &node.get_type() == t),
         ];
 
-
         conditions.iter().all(|c| *c)
-
     }));
 
     for v in results {
@@ -100,8 +105,18 @@ fn locate(args: Args) -> Result<(), Error> {
 
         print!("{:<40} {:>14} {:>1} {}", attr, size.separated_string(), typ, store_path.as_str());
 
-        io::stdout().write_all(&path)?;
-        io::stdout().write_all(b"\n")?;
+        let path = String::from_utf8_lossy(&path);
+
+        if args.color {
+            let mut prev = 0;
+            for mat in pattern.regex().find_iter(&path.as_bytes()) {
+                print!("{}{}", &path[prev..mat.start()], Red.paint(&path[mat.start()..mat.end()]));
+                prev = mat.end();
+            }
+            println!("{}", &path[prev..]);
+        } else {
+            println!("{}", path);
+        }
     }
 
     Ok(())
@@ -117,6 +132,12 @@ fn run<'a>(matches: ArgMatches<'a>) -> Result<(), Error> {
             regex::escape(&s)
         }
     };
+    let color = matches.value_of("color").and_then(|x| {
+        if x == "auto" { return None }
+        if x == "always" { return Some(true) }
+        if x == "never" { return Some(false) }
+        unreachable!("color can only be auto, always or never (verified by clap already)")
+    });
     let args = Args {
         database: PathBuf::from(matches.value_of("database").expect("database has default value by clap")),
         group: !matches.is_present("no-group"),
@@ -133,6 +154,7 @@ fn run<'a>(matches: ArgMatches<'a>) -> Result<(), Error> {
             }).collect()
         }),
         only_toplevel: matches.is_present("toplevel"),
+        color: color.unwrap_or_else(isatty::stdout_isatty)
     };
 
     return locate(args);
@@ -191,9 +213,12 @@ fn main() {
                      the first match will be printed. This option disables that behavior and prints\n\
                      all matches."
               ))
-
-
-
+        .arg(Arg::with_name("color")
+             .multiple(false)
+             .value_name("COLOR")
+             .possible_values(&["always", "never", "auto"])
+             .help("Whether to use colors in output. If auto, only use colors if outputting to a terminal.")
+        )
         .get_matches();
 
     run(matches).unwrap_or_else(|e| {

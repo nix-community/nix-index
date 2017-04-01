@@ -8,6 +8,8 @@ use std::str;
 use std::io::{self, Write};
 use memchr::memchr;
 
+use frcode;
+
 /// This enum represents a single node in a file tree.
 ///
 /// The type is generic over the contents of a directory node,
@@ -96,19 +98,19 @@ impl<T> FileNode<T> {
 }
 
 impl FileNode<()> {
-    pub fn encode<W: Write>(&self, writer: &mut W) -> io::Result<()> {
+    fn encode<W: Write>(&self, encoder: &mut frcode::Encoder<W>) -> io::Result<()> {
         use self::FileNode::*;
         match self {
             &Regular { executable, size } => {
                 let e = if executable { "x" } else { "r" };
-                write!(writer, "{}{}", e, size)?;
+                encoder.write_meta(format!("{}{}", size, e).as_bytes())?;
             }
             &Symlink { ref target } => {
-                writer.write_all(b"s")?;
-                writer.write_all(target)?;
+                encoder.write_meta(target)?;
+                encoder.write_meta(b"s")?;
             },
             &Directory { size, contents: () }=> {
-                write!(writer, "d{}", size)?;
+                encoder.write_meta(format!("{}d", size).as_bytes())?;
             }
         }
         Ok(())
@@ -116,7 +118,7 @@ impl FileNode<()> {
 
     pub fn decode(buf: &[u8]) -> Option<Self> {
         use self::FileNode::*;
-        buf.split_first().and_then(|(kind, buf)| match *kind {
+        buf.split_last().and_then(|(kind, buf)| match *kind {
             b'x' | b'r' => {
                 let executable = *kind == b'x';
                 str::from_utf8(buf).ok().and_then(|s| s.parse().ok()).map(|size| {
@@ -153,17 +155,16 @@ pub struct FileTreeEntry {
 }
 
 impl FileTreeEntry {
-    pub fn encode<W: Write>(&self, writer: &mut W) -> io::Result<()> {
-        writer.write_all(&self.path)?;
-        writer.write_all(b"\n")?;
-        self.node.encode(writer)?;
+    pub fn encode<W: Write>(self, encoder: &mut frcode::Encoder<W>) -> io::Result<()> {
+        self.node.encode(encoder)?;
+        encoder.write_path(self.path)?;
         Ok(())
     }
 
     pub fn decode(buf: &[u8]) -> Option<FileTreeEntry> {
-        memchr(b'\n', buf).and_then(|sep| {
-            let node = &buf[(sep + 1)..];
-            let path = &buf[0..sep];
+        memchr(b'\0', buf).and_then(|sep| {
+            let path = &buf[(sep + 1)..];
+            let node = &buf[0..sep];
             FileNode::decode(node).map(|node| {
                 FileTreeEntry {
                     path: path.to_vec(),

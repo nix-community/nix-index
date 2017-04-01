@@ -158,7 +158,7 @@ fn try_load_paths_cache() ->
     };
 
     let mut input = io::BufReader::new(file);
-    let fetched: Vec<(StorePath, FileTree)> = bincode::deserialize_from(&mut input, bincode::SizeLimit::Infinite)?;
+    let fetched: Vec<(StorePath, FileTree)> = bincode::deserialize_from(&mut input, bincode::Infinite)?;
     let workset = WorkSet::from_iter(fetched.into_iter().map(|(path, tree)| (path.hash().to_string(), (path, Some(tree)))));
     let watch = workset.watch();
     let stream = workset.then(|r| {
@@ -241,7 +241,7 @@ fn update_index(args: Args, lp: &mut Core, session: &Session) -> Result<(), Erro
     if args.path_cache {
         writeln!(io::stderr(), "+ writing path cache")?;
         let mut output = io::BufWriter::new(File::create("paths.cache")?);
-        bincode::serialize_into(&mut output, &results, bincode::SizeLimit::Infinite)?;
+        bincode::serialize_into(&mut output, &results, bincode::Infinite)?;
     }
 
     let index_size = db.finish()?;

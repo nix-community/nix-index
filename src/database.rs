@@ -3,9 +3,9 @@ use std::fs::{File};
 use std::path::{Path};
 use std::fmt;
 use zstd;
-use grep::{Grep, Match};
-use memchr::memchr;
+use grep::{Grep, Match, GrepBuilder};
 use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
+use serde_json;
 
 use package::{StorePath};
 use files::{FileTree, FileTreeEntry};
@@ -37,11 +37,9 @@ impl Writer {
 
     pub fn add(&mut self, path: StorePath, files: FileTree) -> io::Result<()> {
         let writer = self.writer.as_mut().expect("not dropped yet");
-        let mut encoder = frcode::Encoder::new(writer, path.encode()?);
+        let mut encoder = frcode::Encoder::new(writer, b"p".to_vec(), serde_json::to_vec(&path).unwrap());
         for entry in files.to_list() {
-            let mut encoded = Vec::new();
-            entry.encode(&mut encoded)?;
-            encoder.encode(encoded)?;
+            entry.encode(&mut encoder)?;
         }
         Ok(())
     }
@@ -65,6 +63,7 @@ pub enum Error {
     UnsupportedFileType,
     UnsupportedVersion(u64),
     MissingFileMeta(Vec<u8>),
+    MissingPackageEntry,
     EntryParseFailed(Vec<u8>),
     StorePathParseFailed(Vec<u8>),
 }
@@ -81,6 +80,7 @@ impl fmt::Display for Error {
             &MissingFileMeta(ref e) => write!(f, "format error, file without meta information: {}", String::from_utf8_lossy(e)),
             &EntryParseFailed(ref e) => write!(f, "failed to parse entry. raw entry: {}", String::from_utf8_lossy(e)),
             &StorePathParseFailed(ref e) => write!(f, "failed to parse store path. raw bytes: {}", String::from_utf8_lossy(e)),
+            &MissingPackageEntry => write!(f, "format error, found a file entry without matching package entry"),
             &UnsupportedVersion(v) => write!(f, "this executable only supports the nix-index database version {}, but found a database with version {}", FORMAT_VERSION, v),
             &UnsupportedFileType => write!(f, "the file is not a nix-index database")
         }
@@ -97,7 +97,6 @@ impl From<frcode::Error> for Error {
 
 pub struct Reader {
     decoder: frcode::Decoder<BufReader<zstd::Decoder<File>>>,
-    buf: Vec<u8>,
 }
 
 impl Reader {
@@ -118,88 +117,93 @@ impl Reader {
         let decoder = zstd::Decoder::new(file)?;
         Ok(Reader {
             decoder: frcode::Decoder::new(BufReader::new(decoder)),
-            buf: Vec::new(),
         })
     }
 
     pub fn find_iter<'a, 'b>(&'a mut self, pattern: &'b Grep) -> ReaderIter<'a, 'b> {
         ReaderIter {
             reader: self,
-            pos: 0,
-            package: Vec::new(),
+            found: Vec::new(),
+            found_without_package: Vec::new(),
             pattern: pattern,
+            package_entry_pattern: GrepBuilder::new("^p\0").build().expect("valid regex"),
         }
     }
 }
 
 pub struct ReaderIter<'a, 'b> {
     reader: &'a mut Reader,
-    pos: usize,
-    package: Vec<u8>,
+    found: Vec<(StorePath, FileTreeEntry)>,
+    found_without_package: Vec<FileTreeEntry>,
     pattern: &'b Grep,
+    package_entry_pattern: Grep, 
 }
 
 impl<'a, 'b> ReaderIter<'a, 'b> {
-    fn fill_package(&mut self) -> Result<bool, Error> {
-        self.reader.buf.clear();
-        self.pos = 0;
-        loop {
-            match self.reader.decoder.decode()? {
-                frcode::Item::Entry(path) => {
-                    self.reader.buf.extend_from_slice(path);
-                    self.reader.buf.push(b'\n');
-                },
-                frcode::Item::Footer(info) => {
-                    self.package = info;
-                    self.pos = 0;
-                    return Ok(true);
-                },
-                frcode::Item::EOF => {
-                    return Ok(false)
-                }
+    fn fill_buf(&mut self) -> Result<(), Error> {
+        while self.found.is_empty() {
+            let &mut ReaderIter {
+                ref mut reader,
+                ref package_entry_pattern,
+                ..
+            } = self;
+            let block = reader.decoder.decode()?;
+
+            if block.is_empty() {
+                return Ok(())
             }
-        }
-    }
 
-    pub fn next_match(&mut self) -> Result<Option<(StorePath, FileTreeEntry)>, Error> {
-        let mut mat = Match::new();
-        loop {
-            let found = self.pattern.read_match(&mut mat, &self.reader.buf, self.pos);
+            let mut cached_package: Option<(StorePath, usize)> = None;
+            let mut no_more_package = false;
+            let mut find_package = |item_end| -> Result<_, Error> {
+                if let Some((ref pkg, end)) = cached_package {
+                    if item_end < end {
+                        return Ok(Some(pkg.clone()))
+                    }
+                }
 
-            if !found {
-                if self.fill_package()? {
-                    continue
-                } else {
+                let mut mat = Match::new();
+                if no_more_package || !package_entry_pattern.read_match(&mut mat, block, item_end) {
+                    no_more_package = true;
                     return Ok(None)
                 }
+
+                let json = &block[mat.start() + 2..mat.end()-1];
+                let pkg: StorePath = serde_json::from_slice(json).ok().ok_or_else(|| {
+                    Error::StorePathParseFailed(json.to_vec())
+                })?;
+                cached_package = Some((pkg.clone(), mat.end()));
+                Ok(Some(pkg))
+            };
+
+            if !self.found_without_package.is_empty() {
+                if let Some(pkg) = find_package(0)? {
+                    for entry in self.found_without_package.split_off(0) {
+                        self.found.push((pkg.clone(), entry));
+                    }
+                }
             }
 
-            if self.reader.buf[mat.start()] != b'/' {
-                self.pos = mat.end();
-                continue
-            }
+            for mat in self.pattern.iter(block) {
+                let entry = &block[mat.start()..mat.end()-1];
+                if self.package_entry_pattern.regex().is_match(entry) {
+                    continue
+                }
+                let entry = FileTreeEntry::decode(entry).ok_or_else(|| {
+                    Error::EntryParseFailed(entry.to_vec())
+                })?;
 
-            break
+                match find_package(mat.end())? {
+                    None => self.found_without_package.push(entry),
+                    Some(pkg) => self.found.push((pkg, entry))
+                }
+            }
         }
-
-        self.pos = mat.end() + memchr(b'\n', &self.reader.buf[mat.end()..]).ok_or_else(|| {
-            let file = &self.reader.buf[mat.start()..mat.end()];
-            Error::MissingFileMeta(file.to_vec())
-        })?;
-
-        let store_path = StorePath::decode(&self.package).ok_or_else(|| {
-            Error::StorePathParseFailed(self.package.clone())
-        })?;
-
-        let entry = &self.reader.buf[mat.start()..self.pos];
-        let entry = FileTreeEntry::decode(entry).ok_or_else(|| {
-            Error::EntryParseFailed(entry.to_vec())
-        })?;
-
-        // skip over the newline character
-        self.pos += 1;
-
-        Ok(Some((store_path, entry)))
+        Ok(())
+    }
+    pub fn next_match(&mut self) -> Result<Option<(StorePath, FileTreeEntry)>, Error> {
+        self.fill_buf()?;
+        Ok(self.found.pop())
     }
 }
 
