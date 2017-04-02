@@ -36,3 +36,10 @@ zstd = "0.4.3"
 
 [profile.release]
 debug = true
+
+[[bin]]
+name = "nix-index"
+doc = false
+
+[[bin]]
+name = "nix-locate"

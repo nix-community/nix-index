@@ -27,23 +27,23 @@
 //! As an example, consider the following non-encoded plaintext, where `:` separates the metadata from the path:
 //!
 //! ```text
-//! directory:/
-//! directory:/foo
-//! directory:/foo/bar
-//! file:/foo/bar/test.txt
-//! file:/foo/bar/text.txt
-//! directory:/foo/baz
-//! ````
+//! d:/
+//! d:/foo
+//! d:/foo/bar
+//! f:/foo/bar/test.txt
+//! f:/foo/bar/text.txt
+//! d:/foo/baz
+//! ```
 //!
 //! This text would be encoded as (using `[v]` to indicate a byte with the value of v)
 //!
 //! ```text
-//! directory[0][0]/
-//! directory[0][1]foo
-//! directory[0][3]/bar
-//! file[0][4]/test.txt
-//! file[0][3]xt.txt
-//! directory[0][-4]z
+//! d[0][0]/
+//! d[0][1]foo
+//! d[0][3]/bar
+//! f[0][4]/test.txt
+//! f[0][3]xt.txt
+//! d[0][-4]z
 //! ```
 //!
 //! At the beginning, there is no previous entry, so the shared prefix length must always be `0` (and so must the shared prefix differential).
