@@ -18,6 +18,8 @@ extern crate zstd;
 extern crate memchr;
 extern crate byteorder;
 extern crate xz2;
+#[macro_use]
+extern crate error_chain;
 
 pub mod nixpkgs;
 pub mod files;
