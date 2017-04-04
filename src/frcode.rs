@@ -382,6 +382,27 @@ impl<R: BufRead> Decoder<R> {
     }
 }
 
+/// This struct implements an encoder for the frcode format. The encoder
+/// writes directly to the underlying `Write` instance.
+///
+/// To encode an entry you should first call `write_meta` a number of times
+/// to fill the meta data portion. Then, call `write_path` once to finialize the entry.
+///
+/// One important property of this encoder is that it is safe to open and close
+/// it multiple times on the same stream, like this:
+///
+/// ```text
+/// {
+///   let encoder1 = Encoder::new(&mut stream);
+/// } // encoder1 gets dropped here
+/// {
+///   let encoder2 = Encoder::new(&mut stream);
+/// }
+/// ```
+///
+/// To support this, the encoder has a "footer" item that will get written when it is dropped.
+/// This is necessary because we need to write at least one more entry to reset the shared prefix
+/// length to zero, since the next encoder will expect that as initial state.
 pub struct Encoder<W: Write> {
     writer: W,
     last: Vec<u8>,
@@ -398,11 +419,22 @@ impl<W: Write> Drop for Encoder<W> {
 }
 
 impl<W: Write> Encoder<W> {
+    /// Constructs a new encoder for the specific writer.
+    ///
+    /// The encoder will write the given `footer_meta` and `footer_path` as the last entry.
+    ///
+    /// # Panics
+    ///
+    /// If either `footer_meta` or `footer_path` contain NUL or newline bytes.
     pub fn new(writer: W, footer_meta: Vec<u8>, footer_path: Vec<u8>) -> Encoder<W> {
         assert!(!footer_meta.contains(&b'\x00'),
                 "footer meta must not contain null bytes");
         assert!(!footer_path.contains(&b'\x00'),
                 "footer path must not contain null bytes");
+        assert!(!footer_meta.contains(&b'\n'),
+                "footer meta must not contain newlines");
+        assert!(!footer_path.contains(&b'\n'),
+                "footer path must not contain newlines");
         Encoder {
             writer: writer,
             last: Vec::new(),
@@ -413,6 +445,10 @@ impl<W: Write> Encoder<W> {
         }
     }
 
+    /// Writes the specific shared prefix differential to the output stream.
+    ///
+    /// This function takes care of the variable-length encoding using for prefix differentials
+    /// in the frcode format.
     fn encode_diff(&mut self, diff: i16) -> io::Result<()> {
         let low = (diff & 0xFF) as u8;
         if diff.abs() < i8::max_value() as i16 {
@@ -424,15 +460,41 @@ impl<W: Write> Encoder<W> {
         Ok(())
     }
 
+    /// Writes the meta data of an entry to the output stream.
+    ///
+    /// This function can be called multiple times to extend the current meta data part.
+    /// Since the meta data is written as-is to the output stream, calling the function
+    /// multiple times will concatenate the meta data of all calls.
+    ///
+    /// # Panics
+    ///
+    /// If the meta data contains NUL bytes or newlines.
     pub fn write_meta(&mut self, meta: &[u8]) -> io::Result<()> {
         assert!(!meta.contains(&b'\x00'),
                 "entry must not contain null bytes");
+        assert!(!meta.contains(&b'\n'),
+                "entry must not contain newlines");
 
         self.writer.write_all(meta)?;
         Ok(())
     }
 
+    /// Finalizes an entry by encoding its path to the output stream.
+    ///
+    /// This function should be called after you've finished writing the meta data for
+    /// the current entry. It will terminate the meta data part by writing the NUL byte
+    /// and then encode the path into the output stream.
+    ///
+    /// The entry will be terminated with a newline.
+    ///
+    /// # Panics
+    ///
+    /// If the path contains NUL bytes or newlines.
     pub fn write_path(&mut self, path: Vec<u8>) -> io::Result<()> {
+        assert!(!path.contains(&b'\x00'),
+                "entry must not contain null bytes");
+        assert!(!path.contains(&b'\x00'),
+                "entry must not contain newlines");
         self.writer.write_all(&[b'\x00'])?;
 
         let mut shared: isize = 0;
@@ -458,6 +520,12 @@ impl<W: Write> Encoder<W> {
         Ok(())
     }
 
+    /// Writes the footer entry.
+    ///
+    /// The footer entry will not share any prefix with the preceding entry,
+    /// so after this function, the shared prefix length is zero. This guarantees
+    /// that we can start another Encoder after this item, since the Encoder expects
+    /// the initial shared prefix length to be zero.
     fn write_footer(&mut self) -> io::Result<()> {
         if self.footer_written {
             return Ok(());
@@ -473,6 +541,10 @@ impl<W: Write> Encoder<W> {
         Ok(())
     }
 
+    /// Finishes the encoder by writing the footer entry.
+    ///
+    /// This function is called by drop, but calling it explictly is recommended as
+    /// drop has no way to report IO errors that may occur during writing the footer.
     pub fn finish(mut self) -> io::Result<()> {
         self.write_footer()?;
 
