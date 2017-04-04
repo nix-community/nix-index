@@ -1,25 +1,244 @@
-use curl;
 use serde;
 use serde_json;
 use super::util;
 
 use std::fmt;
-use std::str::{self, Utf8Error};
+use std::result;
+use std::str::{self, Utf8Error, FromStr};
 use std::collections::HashMap;
-use std::io::{self, Write, Read};
-use std::sync::{Arc, Mutex};
+use std::io::{self, Write};
 use std::path::PathBuf;
 use std::time::{Instant, Duration};
-use tokio_curl::Session;
-use curl::easy::Easy;
-use futures::Future;
-use futures::future;
-use xz2::read::XzDecoder;
+use futures::{Stream, Future};
+use futures::future::{self, Either};
+use xz2::write::XzDecoder;
 use serde::de::{Deserialize, Deserializer, MapVisitor, Visitor};
 use serde::bytes::ByteBuf;
+use hyper::client::{Client, Response, Connect};
+use hyper::{self, Uri, StatusCode};
+use hyper::header::{ContentType, ContentEncoding, Encoding};
+use brotli2::write::BrotliDecoder;
+use mime::{Mime};
 
 use files::FileTree;
 use package::{StorePath, PathOrigin};
+
+error_chain! {
+    errors {
+        Http(url: String, code: StatusCode) {
+            description("http status code error")
+            display("request GET '{}' failed with HTTP error {}", url, code)
+        }
+        ParseResponse(url: String, tmp_file: Option<PathBuf>) {
+            description("response parse error")
+            display("response to GET '{}' failed to parse{}", url, tmp_file.as_ref().map_or("".into(), |f| format!(" (response saved to {})", f.to_string_lossy())))
+        }
+        ParseStorePath(url: String, path: String) {
+            description("store path parse error")
+            display("response to GET '{}' contained invalid store path '{}', expected string matching format $(NIX_STORE_DIR)$(HASH)-$(NAME)", url, path)
+        }
+        Unicode(url: String, bytes: Vec<u8>, err: Utf8Error) {
+            description("unicode error")
+            display("response to GET '{}' contained invalid unicode byte {}: {}", url, bytes[err.valid_up_to()], err)
+        }
+        Decode(url: String) {
+            description("decoder error")
+            display("response to GET '{}' could not be decoded", url)
+        }
+        UnsupportedEncoding(url: String, encoding: Option<ContentEncoding>, typ: Option<ContentType>) {
+            description("unsupported content-encoding/type")
+                display(
+                    "response to GET '{}' had unsupported content-encoding ({}) and content-type ({}) \
+                     combination ",
+                    url,
+                    encoding.as_ref().map_or("not present".to_string(), |v| format!("'{}'", v)),
+                    typ.as_ref().map_or("not present".to_string(), |v| format!("'{}'", v)),
+                )
+        }
+    }
+    foreign_links {
+        Hyper(hyper::Error);
+    }
+}
+
+fn fetch<'a, C: Connect>(url: String, client: &'a Client<C>) -> Box<Future<Item = (String, Option<Vec<u8>>), Error = Error> + 'a> {
+    let uri = Uri::from_str(&url).map_err(|e| Error::from(hyper::Error::from(e)));
+    let process_response = move |res: Response| {
+        let code = res.status();
+        
+        if code == StatusCode::NotFound {
+            return Either::A(future::ok((url, None)))
+        }
+
+        if !code.is_success() {
+            return Either::A(future::err(Error::from(ErrorKind::Http(url, code))));
+        }
+
+        let (type_binary, type_json) = match res.headers().get::<ContentType>() {
+            Some(&ContentType(Mime(ref top, ref sub, _))) => {
+                let binary = top.as_str() == "binary" && sub.as_str() == "octet-stream";
+                let json = (top.as_str() == "application" || top.as_str() == "text") && sub.as_str() == "json";
+                (binary, json)
+            }
+            _ => (false, false),
+        };
+
+        let (encoding_xz, encoding_brotli, encoding_identity) = match res.headers().get::<ContentEncoding>() {
+            Some(ref encodings) if encodings.len() == 1 => {
+                let encoding = &encodings[0];
+                match *encoding {
+                    Encoding::EncodingExt(ref e) if e == "xz" => (true, false, false),
+                    Encoding::Brotli => (false, true, false),
+                    Encoding::Identity => (false, false, true),
+                    _ => (false, false, false),
+                }
+            },
+            _ => (false, false, false)
+        };
+        let has_encoding = res.headers().has::<ContentEncoding>();
+
+        let decoded = {
+            if type_binary && url.ends_with(".xz") || type_json && encoding_xz {
+                let body = res.body().map_err(Error::from);
+                Either::A(
+                    body.fold((url, XzDecoder::new(Vec::new())), move |(url, mut decoder), chunk| {
+                        decoder.write_all(&chunk)
+                            .chain_err(|| ErrorKind::Decode(url.clone()))
+                            .map(move |_| (url, decoder))
+                    }).and_then(|(url, mut d)| {
+                        d.finish()
+                            .chain_err(|| ErrorKind::Decode(url.clone()))
+                            .map(move |v| (url, v) )
+                    })
+                )
+            } else if type_json && encoding_brotli {
+                let body = res.body().map_err(Error::from);
+                Either::B(Either::A(
+                    body.fold((url, BrotliDecoder::new(Vec::new())), move |(url, mut decoder), chunk| {
+                        decoder.write_all(&chunk)
+                            .chain_err(|| ErrorKind::Decode(url.clone()))
+                            .map(move |_| (url, decoder))
+                    }).and_then(|(url, mut d)| {
+                        d.finish()
+                            .chain_err(|| ErrorKind::Decode(url.clone()))
+                            .map(move |v| (url, v))
+                    })
+                ))
+            } else if encoding_identity || !has_encoding {
+                let body = res.body().map_err(Error::from);
+                let decoded = body.fold(Vec::new(), |mut v, chunk| {
+                    v.extend_from_slice(&chunk);
+                    Ok(v) as Result<_>
+                });
+                Either::B(Either::B(decoded.map(move |r| (url, r))))
+            } else {
+                let encoding = res.headers().get::<ContentEncoding>().cloned();
+                let typ = res.headers().get::<ContentType>().cloned();
+                return Either::A(future::err(ErrorKind::UnsupportedEncoding(url, encoding, typ).into()))
+            }
+        };
+
+
+        Either::B(decoded.map(|(url, v)| (url, Some(v))))
+    };
+
+    Box::new(future::result(uri).and_then(move |u| client.get(u).from_err()).and_then(process_response))
+}
+
+pub fn fetch_references<'a, C: Connect> (
+    cache_url: &str,
+    client: &'a Client<C>,
+    mut path: StorePath,
+) -> Box<Future<Item = (StorePath, Vec<StorePath>), Error = Error> + 'a> {
+    let url = format!("{}/{}.narinfo", cache_url, path.hash());
+
+    let parse_response = move |(url, data)| {
+        let url: String = url;
+        let data: Vec<u8> = match data {
+            Some(v) => v,
+            None => return Ok((path, vec![]))
+        };
+        let references = b"References:";
+        let store_path = b"StorePath:";
+        let mut result = Vec::new();
+        for line in data.split(|x| x == &b'\n') {
+            if line.starts_with(references) {
+                let line = &line[references.len()..];
+                let line = str::from_utf8(line).map_err(|e| ErrorKind::Unicode(url.clone(), line.to_vec(), e))?;
+                result = line.trim().split_whitespace().map(|new_path| {
+                    let new_origin = PathOrigin { toplevel: false, ..path.origin().into_owned() };
+                    StorePath::parse(new_origin, new_path).ok_or_else(|| ErrorKind::ParseStorePath(url.clone(), new_path.to_string()).into())
+                }).collect::<Result<Vec<_>>>()?;
+            }
+
+            if line.starts_with(store_path) {
+                let line = &line[references.len()..];
+                let line = str::from_utf8(line).map_err(|e| ErrorKind::Unicode(url.clone(), line.to_vec(), e))?;
+                let line = line.trim();
+
+                path = StorePath::parse(path.origin().into_owned(), line).ok_or_else(|| ErrorKind::ParseStorePath(url.clone(), line.to_string()))?;
+            }
+        }
+
+        Ok((path, result))
+    };
+
+    Box::new(fetch(url, client).and_then(move |x| parse_response(x)))
+}
+
+pub fn fetch_files<'a, C: Connect>(
+    cache_url: &str,
+    client: &'a Client<C>,
+    path: &StorePath,
+
+) -> Box<Future<Item = Option<FileTree>, Error = Error> + 'a> {
+    let url_xz = format!("{}/{}.ls.xz", cache_url, path.hash());
+    let url_br = format!("{}/{}.ls", cache_url, path.hash());
+    let name = format!("{}.json", path.hash());
+
+    let fetched = fetch(url_xz, client).and_then(move |(url, r)| match r {
+        Some(v) => Either::A(future::ok((url, Some(v)))),
+        None => Either::B(fetch(url_br, client)),
+    });
+
+    let parse_response = move |(url, res)| {
+        let url: String = url;
+        let res: Option<Vec<u8>> = res;
+        let contents = match res {
+            None => return Ok(None),
+            Some(v) => v,
+        };
+
+        let now = Instant::now();
+        let response: FileListingResponse = serde_json::from_slice(&contents).chain_err(|| {
+            ErrorKind::ParseResponse (
+                url,
+                util::write_temp_file("file_listing.json", &contents)
+            )
+        })?;
+        let duration = now.elapsed();
+
+        if duration > Duration::from_millis(2000) {
+            let secs = duration.as_secs();
+            let millis = duration.subsec_nanos() / 1000000;
+            
+            writeln!(&mut io::stderr(),
+                     "warning: took a long time to parse: {}s:{:03}ms",
+                     secs,
+                     millis).unwrap_or(());
+            if let Some(p) = util::write_temp_file(&name, &contents) {
+                writeln!(&mut io::stderr(),
+                         "saved response to file: {}",
+                         p.to_string_lossy()).unwrap_or(());
+            }
+        }
+
+        Ok(Some(response.root.0))
+    };
+
+    Box::new(fetched.and_then(parse_response))
+
+}
 
 #[derive(Deserialize, Debug, PartialEq)]
 struct FileListingResponse {
@@ -29,80 +248,8 @@ struct FileListingResponse {
 #[derive(Debug, PartialEq)]
 struct HydraFileListing(FileTree);
 
-pub fn fetch_files<'a>(
-    cache_url: &str,
-    session: &'a Session,
-    path: &StorePath,
-) -> Box<Future<Item = Option<FileTree>, Error = Error> + 'a> {
-    let url = format!("{}/{}.ls.xz", cache_url, path.hash());
-    let name = format!("{}.json", path.hash());
-
-    util::future_result(|| {
-        let mut req = Easy::new();
-
-        req.url(&url)?;
-        req.accept_encoding("zlib,identity,gzip")?;
-
-        let buffer = Arc::new(Mutex::new(Vec::new()));
-
-        let sink = buffer.clone();
-        req.write_function(move |data| {
-                                sink.lock().unwrap().write_all(data).unwrap();
-                                Ok(data.len())
-                            })?;
-
-        let process_response = move |mut res: Easy| {
-            let code = res.response_code()?;
-
-            if code == 404 {
-                return Ok(None);
-            }
-
-            if code / 100 != 2 {
-                return Err(Error::Http(url, code));
-            }
-
-            let data = buffer.lock().unwrap();
-            let mut reader = XzDecoder::new(io::Cursor::new(&*data));
-            let mut contents = Vec::new();
-            reader.read_to_end(&mut contents)?;
-
-            let now = Instant::now();
-            let response: FileListingResponse = serde_json::from_slice(&contents).map_err(|e| {
-                             Error::Parse(url,
-                                          e,
-                                          util::write_temp_file("file_listing.json", &contents))
-                         })?;
-            let duration = now.elapsed();
-
-            if duration > Duration::from_millis(2000) {
-                let secs = duration.as_secs();
-                let millis = duration.subsec_nanos() / 1000000;
-
-                writeln!(&mut io::stderr(),
-                         "warning: took a long time to parse: {}s:{:03}ms",
-                         secs,
-                         millis)?;
-                if let Some(p) = util::write_temp_file(&name, &contents) {
-                    writeln!(&mut io::stderr(),
-                             "saved response to file: {}",
-                             p.to_string_lossy())?;
-                }
-            }
-
-            Ok(Some(response.root.0))
-        };
-
-        Ok(session
-               .perform(req)
-               .map_err(|e| Error::Io(e.into_error()))
-               .and_then(move |res| future::result(process_response(res))))
-    })
-            .boxed()
-}
-
 impl Deserialize for HydraFileListing {
-    fn deserialize<D: Deserializer>(d: D) -> Result<HydraFileListing, D::Error> {
+    fn deserialize<D: Deserializer>(d: D) -> result::Result<HydraFileListing, D::Error> {
         struct Root;
 
         impl Visitor for Root {
@@ -112,7 +259,7 @@ impl Deserialize for HydraFileListing {
                 write!(f, "a file listing (map)")
             }
 
-            fn visit_map<V: MapVisitor>(self, mut visitor: V) -> Result<FileTree, V::Error> {
+            fn visit_map<V: MapVisitor>(self, mut visitor: V) -> result::Result<FileTree, V::Error> {
                 const VARIANTS: &'static [&'static str] = &["regular", "directory", "symlink"];
 
                 let mut typ: Option<ByteBuf> = None;
@@ -190,115 +337,3 @@ impl Deserialize for HydraFileListing {
     }
 }
 
-pub enum Error {
-    Io(io::Error),
-    Curl(curl::Error),
-    Http(String, u32),
-    Parse(String, serde_json::Error, Option<PathBuf>),
-    InvalidStorePath(String),
-    InvalidUnicode(Vec<u8>, Utf8Error),
-}
-
-impl From<io::Error> for Error {
-    fn from(err: io::Error) -> Self {
-        Error::Io(err)
-    }
-}
-
-impl From<curl::Error> for Error {
-    fn from(err: curl::Error) -> Self {
-        Error::Curl(err)
-    }
-}
-
-impl fmt::Display for Error {
-    fn fmt(&self, f: &mut fmt::Formatter) -> Result<(), fmt::Error> {
-        use self::Error::*;
-        match *self {
-            Io(ref e) => write!(f, "input/output error: {}", e),
-            Curl(ref e) => write!(f, "curl error: {}", e),
-            Http(ref url, c) => write!(f, "error while fetching {}: http code {}", url, c),
-            Parse(ref url, ref e, ref contents) => {
-                write!(f, "failed to parse file listing {}: {}", url, e)?;
-                if let Some(ref p) = *contents {
-                    write!(f, "\nresponse written to {}", p.to_string_lossy())?
-                }
-                Ok(())
-            }
-            InvalidStorePath(ref s) => {
-                write!(f,
-                       "failed to parse store path, must match format $(NIX_STORE_DIR)$(HASH)-name: {}",
-                       s)
-            }
-            InvalidUnicode(ref bytes, ref e) => {
-                write!(f, "invalid unicode byte {}: {}", bytes[e.valid_up_to()], e)
-            }
-        }
-    }
-}
-
-pub fn fetch_references<'a>
-    (
-    cache_url: &str,
-    session: &'a Session,
-    mut path: StorePath,
-) -> Box<Future<Item = (StorePath, Vec<StorePath>), Error = Error> + 'a> {
-    let url = format!("{}/{}.narinfo", cache_url, path.hash());
-
-    util::future_result(|| {
-        let mut req = Easy::new();
-
-        req.url(&url)?;
-        req.accept_encoding("zlib,identity,gzip")?;
-
-        let buffer = Arc::new(Mutex::new(Vec::new()));
-
-        let sink = buffer.clone();
-        req.write_function(move |data| {
-            sink.lock().unwrap().write_all(data).unwrap();
-            Ok(data.len())
-        })?;
-
-        let process_response = move |mut res: Easy| {
-            let code = res.response_code()?;
-
-            if code == 404 {
-                return Ok((path, Vec::new()))
-            }
-
-            if code / 100 != 2 {
-                return Err(Error::Http(url, code))
-            }
-
-            let data = buffer.lock().unwrap();
-
-            let references = b"References:";
-            let store_path = b"StorePath:";
-            let mut result = Vec::new();
-            for line in data.split(|x| x == &b'\n') {
-                if line.starts_with(references) {
-                    let line = &line[references.len()..];
-                    let line = str::from_utf8(line).map_err(|e| Error::InvalidUnicode(line.to_vec(), e))?;
-                    result = line.trim().split_whitespace().map(|new_path| {
-                        let new_origin = PathOrigin { toplevel: false, ..path.origin().into_owned() };
-                        StorePath::parse(new_origin, new_path).ok_or_else(|| Error::InvalidStorePath(new_path.to_string()))
-                    }).collect::<Result<Vec<_>, _>>()?;
-                }
-
-                if line.starts_with(store_path) {
-                    let line = &line[references.len()..];
-                    let line = str::from_utf8(line).map_err(|e| Error::InvalidUnicode(line.to_vec(), e))?;
-                    let line = line.trim();
-
-                    path = StorePath::parse(path.origin().into_owned(), line).ok_or_else(|| Error::InvalidStorePath(line.to_string()))?;
-                }
-            }
-
-            Ok((path, result))
-        };
-
-        Ok(session.perform(req).map_err(|e| Error::Io(e.into_error())).and_then(move |res| {
-            future::result(process_response(res))
-        }))
-    }).boxed()
-}

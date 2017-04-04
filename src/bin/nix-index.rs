@@ -5,11 +5,11 @@ extern crate futures;
 extern crate nix_index;
 extern crate separator;
 extern crate tokio_core;
-extern crate tokio_curl;
 extern crate tokio_retry;
 extern crate tokio_timer;
 extern crate void;
 extern crate xdg;
+extern crate hyper;
 
 use futures::future;
 use futures::{Future, Stream, IntoFuture};
@@ -22,10 +22,10 @@ use std::str;
 use std::iter::FromIterator;
 use std::time::Duration;
 use tokio_core::reactor::Core;
-use tokio_curl::Session;
 use tokio_retry::{RetryStrategy, RetryError, RetryFuture};
 use tokio_retry::strategies::FixedInterval;
 use tokio_timer::Timer;
+use hyper::client::{HttpConnector, Client};
 use separator::Separatable;
 use clap::{Arg, App, ArgMatches};
 use void::ResultVoidExt;
@@ -84,13 +84,26 @@ impl fmt::Display for Error {
                 write!(f,
                        "error while fetching the file listing for path {}: {}",
                        path.as_str(),
-                       e)
+                       e)?;
+                if let RetryError::OperationError(ref e) = *e {
+                    for e in e.iter().skip(1) {
+                        write!(f, "\ncaused by: {}", e)?;
+                    }
+                }
+                Ok(())
             }
             FetchReferences(ref path, ref e) => {
                 write!(f,
                        "error while fetching references for path {}: {}",
                        path.as_str(),
-                       e)
+                       e)?;
+                
+                if let RetryError::OperationError(ref e) = *e {
+                    for e in e.iter().skip(1) {
+                        write!(f, "\ncaused by: {}", e)?;
+                    }
+                }
+                Ok(())
             }
             Serialize(ref e) => write!(f, "failed to serialize output: {}", e),
             Args(ref e) => write!(f, "{}", e),
@@ -99,7 +112,7 @@ impl fmt::Display for Error {
 }
 
 struct Fetcher<'a, S> {
-    session: &'a Session,
+    client: &'a Client<HttpConnector>,
     timer: Timer,
     retry_strategy: S,
     jobs: usize,
@@ -120,7 +133,7 @@ impl<'a, S> Fetcher<'a, S>
             util::future_result(|| -> Result<_, Error> {
                 let fetch = {
                     let path = path.clone();
-                    self.retry(move || hydra::fetch_files(CACHE_URL, self.session, &path))
+                    self.retry(move || hydra::fetch_files(CACHE_URL, self.client, &path))
                 };
 
                 Ok(fetch.then(move |r| {
@@ -152,7 +165,7 @@ impl<'a, S> Fetcher<'a, S>
                 let fetch = {
                     let path = path.clone();
                     self.retry(move || {
-                                   hydra::fetch_references(CACHE_URL, self.session, path.clone())
+                                   hydra::fetch_references(CACHE_URL, self.client, path.clone())
                                })
                 };
 
@@ -210,13 +223,13 @@ struct Args {
     path_cache: bool,
 }
 
-fn update_index(args: &Args, lp: &mut Core, session: &Session) -> Result<(), Error> {
+fn update_index(args: &Args, lp: &mut Core, client: &Client<HttpConnector>) -> Result<(), Error> {
     writeln!(io::stderr(), "+ querying available packages")?;
     let paths: Vec<StorePath> = nixpkgs::query_packages(&args.nixpkgs)?
         .collect::<Result<_, _>>()?;
 
     let fetcher = Fetcher {
-        session: session,
+        client: client,
         timer: Timer::default(),
         retry_strategy: FixedInterval::new(Duration::from_millis(500))
             .jitter()
@@ -289,7 +302,7 @@ fn update_index(args: &Args, lp: &mut Core, session: &Session) -> Result<(), Err
     Ok(())
 }
 
-fn run<'a>(matches: &ArgMatches<'a>, lp: &mut Core, session: &Session) -> Result<(), Error> {
+fn run<'a>(matches: &ArgMatches<'a>, lp: &mut Core, client: &Client<HttpConnector>) -> Result<(), Error> {
     let args = Args {
         jobs: value_t!(matches.value_of("requests"), usize)?,
         database: PathBuf::from(matches.value_of("database").unwrap()),
@@ -302,12 +315,12 @@ fn run<'a>(matches: &ArgMatches<'a>, lp: &mut Core, session: &Session) -> Result
     };
 
 
-    update_index(&args, lp, session)
+    update_index(&args, lp, client)
 }
 
 fn main() {
     let mut lp = Core::new().unwrap();
-    let session = Session::new(lp.handle());
+    let client = Client::new(&lp.handle());
 
     let base = xdg::BaseDirectories::with_prefix("nix-index").unwrap();
     let cache_dir = base.get_cache_home();
@@ -346,7 +359,7 @@ fn main() {
                     Note: does not check if the cached data is up to date! Use only for development."))
         .get_matches();
 
-    run(&matches, &mut lp, &session).unwrap_or_else(|e| {
+    run(&matches, &mut lp, &client).unwrap_or_else(|e| {
                                                         if let Error::Args(e) = e {
                                                             e.exit()
                                                         }
