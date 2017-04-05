@@ -262,10 +262,10 @@ pub fn fetch_files<'a, C: Connect>(
     let url_generic = format!("{}/{}.ls", cache_url, path.hash());
     let name = format!("{}.json", path.hash());
 
-    let fetched = fetch(url_xz, client, Some(SupportedEncoding::Xz)).and_then(move |(url, r)| {
+    let fetched = fetch(url_generic, client, None).and_then(move |(url, r)| {
         match r {
             Some(v) => Either::A(future::ok((url, Some(v)))),
-            None => Either::B(fetch(url_generic, client, None)),
+            None => Either::B(fetch(url_xz, client, Some(SupportedEncoding::Xz))),
         }
     });
 
