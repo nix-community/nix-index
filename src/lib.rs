@@ -18,8 +18,6 @@ extern crate xz2;
 extern crate hyper;
 #[macro_use]
 extern crate error_chain;
-#[macro_use]
-extern crate mime;
 extern crate brotli2;
 
 pub mod nixpkgs;

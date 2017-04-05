@@ -225,8 +225,9 @@ struct Args {
 
 fn update_index(args: &Args, lp: &mut Core, client: &Client<HttpConnector>) -> Result<(), Error> {
     writeln!(io::stderr(), "+ querying available packages")?;
-    let paths: Vec<StorePath> = nixpkgs::query_packages(&args.nixpkgs)?
-        .collect::<Result<_, _>>()?;
+    let normal_paths = nixpkgs::query_packages(&args.nixpkgs, None)?;
+    let haskell_paths = nixpkgs::query_packages(&args.nixpkgs, Some("haskellPackages"))?;
+    let paths: Vec<StorePath> = normal_paths.chain(haskell_paths).collect::<Result<_, _>>()?;
 
     let fetcher = Fetcher {
         client: client,

@@ -1,3 +1,8 @@
+//! Read package information from nix-env.
+//!
+//! This module implements the gathering of initial set of root store paths to fetch.
+//! We parse the output `nix-env --query` to figure out all accessible store paths with their attribute path
+//! and hashes.
 use xml;
 use std::io::{self, Read};
 use xml::reader::{EventReader, XmlEvent};
@@ -7,33 +12,158 @@ use std::fmt;
 
 use package::{PathOrigin, StorePath};
 
-pub struct PackagesParser<R: Read> {
+/// Calls `nix-env` to list the packages in the given nixpkgs.
+///
+/// The `nixpkgs` argument can either be a path to a nixpkgs checkout or another expression
+/// accepted by `nix-env -f`, such as `<nixpkgs>` or `http://example.org/nixpkgs.tar.bz`.
+///
+/// If scope is `Some(attr)`, nix-env is called with the `-A attr` argument so only packages that are a member
+/// of `attr` are returned.
+///
+/// The function returns an Iterator over the packages returned by nix-env.
+pub fn query_packages(nixpkgs: &str, scope: Option<&str>) -> Result<PackagesQuery<ChildStdout>, Error> {
+    let mut cmd = Command::new("nix-env");
+    cmd.arg("-qaP").arg("--out-path")
+        .arg("--xml")
+        .arg("--arg")
+        .arg("config")
+        .arg("{}")
+        .arg("--file")
+        .arg(nixpkgs)
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .stdin(Stdio::null());
+
+    if let Some(scope) = scope {
+        cmd.arg("-A").arg(scope);
+    }
+
+    let mut child = cmd.spawn()?;
+
+    let stdout = child.stdout.take().expect("should have stdout pipe");
+    let packages = PackagesParser::new(stdout);
+
+    Ok(PackagesQuery {
+        parser: Some(packages),
+        child: child,
+    })
+}
+
+/// An iterator that parses the output of nix-env and returns parsed store paths.
+///
+/// Use `query_packages` to create a value of this type.
+pub struct PackagesQuery<R: Read> {
+    parser: Option<PackagesParser<R>>,
+    child: Child,
+}
+
+impl<R: Read> PackagesQuery<R> {
+    /// Waits for the subprocess to exit and checks whether it has returned a non-zero exit code
+    /// (= failed with an error).
+    ///
+    /// If the exit code was non-zero, returns Some(err), else it returns None.
+    fn check_error(&mut self) -> Option<Error> {
+        let mut run = || {
+            let status = self.child.wait()?;
+
+            if !status.success() {
+                let mut message = String::new();
+                self.child
+                    .stderr
+                    .take()
+                    .expect("should have stderr pipe")
+                    .read_to_string(&mut message)?;
+
+                return Err(Error::Command(match status.code() {
+                                              Some(c) => {
+                                                  format!("nix-env failed with exit code {}:\n{}",
+                                                          c,
+                                                          message)
+                                              }
+                                              None => {
+                                                  format!("nix-env failed with unknown exit code:\n{}",
+                                                          message)
+                                              }
+                                          }));
+            }
+
+            Ok(())
+        };
+
+        run().err()
+    }
+}
+
+impl<R: Read> Iterator for PackagesQuery<R> {
+    type Item = Result<StorePath, Error>;
+    fn next(&mut self) -> Option<Self::Item> {
+        self.parser
+            .take()
+            .and_then(|mut parser| {
+                parser
+                    .next()
+                    .map(|v| {
+                        self.parser = Some(parser);
+                        // When the parser throws an error, we first wait for the subprocess to exit.
+                        //
+                        // If the subprocess returned an error, then the parser probably tried to parse garbage output
+                        // so we will ignore the parser error and instead return the error printed by the subprocess.
+                        v.map_err(|e| self.check_error().unwrap_or_else(|| Error::from(e)))
+                    })
+                    .or_else(|| {
+                        self.parser = None;
+                        // At the end, we should check if the subprocess exited successfully.
+                        self.check_error().map(Err)
+                    })
+            })
+    }
+}
+
+/// Parses the XML output of `nix-env` and returns individual store paths.
+struct PackagesParser<R: Read> {
     events: EventReader<R>,
     current_item: Option<String>,
 }
 
+/// A parser error that may occur during parsing `nix-env`'s output.
 #[derive(Debug)]
 pub struct ParserError {
     position: TextPosition,
     kind: ParserErrorKind,
 }
 
+/// Enumerates all possible error kinds that may occur during parsing.
 #[derive(Debug)]
-enum ParserErrorKind {
+pub enum ParserErrorKind {
+    /// Found an element with the tag `element_name` that should only occur inside
+    /// elements with the tag `expected_parent` but it occurred as child of a different parent.
     MissingParent {
         element_name: String,
         expected_parent: String,
     },
+
+    /// An element occurred as a child of `found_parent`, but
+    /// we know that elements with the tag `element_name` should never have that as
+    /// a parent.
     ParentNotAllowed {
         element_name: String,
         found_parent: String,
     },
+
+    /// The required attribute `attribute_name` was missing on an element with the tag `element_name`.
     MissingAttribute {
         element_name: String,
         attribute_name: String,
     },
+
+    /// Found the end tag for `element_name` without a matching start tag.
     MissingStartTag { element_name: String },
+
+    /// An XML syntax error.
     XmlError { error: xml::reader::Error },
+
+    /// A store path in the output of `nix-env` could not be parsed. All valid store paths
+    /// need to match the format `$(STOREDIR)$(HASH)-$(NAME)`.
     InvalidStorePath { path: String },
 }
 
@@ -83,6 +213,7 @@ impl fmt::Display for ParserError {
 }
 
 impl<R: Read> PackagesParser<R> {
+    /// Creates a new parser that reads the `nix-env` XML output from the given reader.
     pub fn new(reader: R) -> PackagesParser<R> {
         PackagesParser {
             events: EventReader::new(reader),
@@ -90,6 +221,7 @@ impl<R: Read> PackagesParser<R> {
         }
     }
 
+    /// Shorthand for exiting with an error at the current position.
     fn err(&self, kind: ParserErrorKind) -> ParserError {
         ParserError {
             position: self.events.position(),
@@ -97,6 +229,13 @@ impl<R: Read> PackagesParser<R> {
         }
     }
 
+    /// Tries to read the next `StorePath` from the reader or fail with an error
+    /// if there was a parse failure.
+    ///
+    /// Returns Ok(None) if the end of the stream was reached.
+    ///
+    /// This function is like `.next` from `Iterator`, but allows us to use `try! / ?` since it
+    /// returns `Result<Option<...>, ...>` instead of `Option<Result<..., ...>>`.
     fn next_err(&mut self) -> Result<Option<StorePath>, ParserError> {
         use self::XmlEvent::*;
         use self::ParserErrorKind::*;
@@ -217,10 +356,16 @@ impl<R: Read> Iterator for PackagesParser<R> {
     }
 }
 
+/// Enumeration of all the possible errors that may happen during querying the packages.
 #[derive(Debug)]
 pub enum Error {
+    /// Parsing of the output failed
     Parse(ParserError),
+
+    /// An IO error occurred
     Io(io::Error),
+
+    /// nix-env failed with an error message
     Command(String),
 }
 
@@ -248,84 +393,5 @@ impl From<ParserError> for Error {
     }
 }
 
-pub struct PackagesQuery<R: Read> {
-    parser: Option<PackagesParser<R>>,
-    child: Child,
-}
-
-impl<R: Read> PackagesQuery<R> {
-    fn check_error(&mut self) -> Option<Error> {
-        let mut run = || {
-            let status = self.child.wait()?;
-
-            if !status.success() {
-                let mut message = String::new();
-                self.child
-                    .stderr
-                    .take()
-                    .expect("should have stderr pipe")
-                    .read_to_string(&mut message)?;
-
-                return Err(Error::Command(match status.code() {
-                                              Some(c) => {
-                                                  format!("nix-env failed with exit code {}:\n{}",
-                                                          c,
-                                                          message)
-                                              }
-                                              None => {
-                                                  format!("nix-env failed with unknown exit code:\n{}",
-                                                          message)
-                                              }
-                                          }));
-            }
-
-            Ok(())
-        };
-
-        run().err()
-    }
-}
-
-impl<R: Read> Iterator for PackagesQuery<R> {
-    type Item = Result<StorePath, Error>;
-    fn next(&mut self) -> Option<Self::Item> {
-        self.parser
-            .take()
-            .and_then(|mut parser| {
-                parser
-                    .next()
-                    .map(|v| {
-                        self.parser = Some(parser);
-                        v.map_err(|e| self.check_error().unwrap_or_else(|| Error::from(e)))
-                    })
-                    .or_else(|| {
-                        self.parser = None;
-                        self.check_error().map(Err)
-                    })
-            })
-    }
-}
 
 
-pub fn query_packages(nixpkgs: &str) -> Result<PackagesQuery<ChildStdout>, Error> {
-    let mut child = Command::new("nix-env").arg("-qaP")
-        .arg("--out-path")
-        .arg("--xml")
-        .arg("--arg")
-        .arg("config")
-        .arg("{}")
-        .arg("--file")
-        .arg(nixpkgs)
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .stdin(Stdio::null())
-        .spawn()?;
-
-    let stdout = child.stdout.take().expect("should have stdout pipe");
-    let packages = PackagesParser::new(stdout);
-
-    Ok(PackagesQuery {
-           parser: Some(packages),
-           child: child,
-       })
-}

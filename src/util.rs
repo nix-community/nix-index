@@ -4,7 +4,7 @@ use std::path::PathBuf;
 use std::fs::OpenOptions;
 use std::env;
 
-use futures::{Future, IntoFuture};
+use futures::{IntoFuture};
 use futures::future::{self, Either, FutureResult};
 
 /// Writes a file to the temp directory with a name that is made of the supplied
