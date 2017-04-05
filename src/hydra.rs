@@ -1,8 +1,8 @@
-/// Interacting with hydra and the binary cache.
-///
-/// This module has all functions that deal with accessing hydra or the binary cache.
-/// Currently, it only provides two functions: `fetch_files` to get the file listing for
-/// a store path and `fetch_references` to retrieve the references from the narinfo.
+//! Interacting with hydra and the binary cache.
+//!
+//! This module has all functions that deal with accessing hydra or the binary cache.
+//! Currently, it only provides two functions: `fetch_files` to get the file listing for
+//! a store path and `fetch_references` to retrieve the references from the narinfo.
 use serde;
 use serde_json;
 use super::util;
