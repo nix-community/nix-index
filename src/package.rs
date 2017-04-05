@@ -182,11 +182,11 @@ impl StorePath {
             .next()
             .and_then(|v| str::from_utf8(v).ok())
             .and_then(|path| {
-                          parts
-                              .next()
-                              .and_then(PathOrigin::decode)
-                              .and_then(|origin| StorePath::parse(origin, path))
-                      })
+                parts
+                    .next()
+                    .and_then(PathOrigin::decode)
+                    .and_then(|origin| StorePath::parse(origin, path))
+            })
     }
 
     /// Returns the name of the store path, which is the part of the file name that

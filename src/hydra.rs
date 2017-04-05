@@ -109,16 +109,16 @@ fn fetch<'a, C: Connect>(
                 let body = res.body().map_err(Error::from);
                 Either::A(body.fold((url, XzDecoder::new(Vec::new())),
                                     move |(url, mut decoder), chunk| {
-                                        decoder
-                                            .write_all(&chunk)
-                                            .chain_err(|| ErrorKind::Decode(url.clone()))
-                                            .map(move |_| (url, decoder))
-                                    })
+                        decoder
+                            .write_all(&chunk)
+                            .chain_err(|| ErrorKind::Decode(url.clone()))
+                            .map(move |_| (url, decoder))
+                    })
                               .and_then(|(url, mut d)| {
-                                            d.finish()
-                                                .chain_err(|| ErrorKind::Decode(url.clone()))
-                                                .map(move |v| (url, v))
-                                        }))
+                    d.finish()
+                        .chain_err(|| ErrorKind::Decode(url.clone()))
+                        .map(move |v| (url, v))
+                }))
             }
 
             Brotli => {
@@ -126,18 +126,16 @@ fn fetch<'a, C: Connect>(
 
                 Either::B(Either::A(body.fold((url, BrotliDecoder::new(Vec::new())),
                                               move |(url, mut decoder), chunk| {
-                                                  decoder
-                                                      .write_all(&chunk)
-                                                      .chain_err(|| {
-                                                                     ErrorKind::Decode(url.clone())
-                                                                 })
-                                                      .map(move |_| (url, decoder))
-                                              })
-                                        .and_then(|(url, mut d)| {
-                                                      d.finish()
+                        decoder
+                            .write_all(&chunk)
                             .chain_err(|| ErrorKind::Decode(url.clone()))
-                            .map(move |v| (url, v))
-                                                  })))
+                            .map(move |_| (url, decoder))
+                    })
+                                        .and_then(|(url, mut d)| {
+                    d.finish()
+                        .chain_err(|| ErrorKind::Decode(url.clone()))
+                        .map(move |v| (url, v))
+                })))
             }
 
             Identity => {
@@ -180,10 +178,18 @@ pub fn fetch_references<'a, C: Connect>
             if line.starts_with(references) {
                 let line = &line[references.len()..];
                 let line = str::from_utf8(line).map_err(|e| ErrorKind::Unicode(url.clone(), line.to_vec(), e))?;
-                result = line.trim().split_whitespace().map(|new_path| {
-                    let new_origin = PathOrigin { toplevel: false, ..path.origin().into_owned() };
-                    StorePath::parse(new_origin, new_path).ok_or_else(|| ErrorKind::ParseStorePath(url.clone(), new_path.to_string()).into())
-                }).collect::<Result<Vec<_>>>()?;
+                result = line.trim()
+                    .split_whitespace()
+                    .map(|new_path| {
+                        let new_origin = PathOrigin {
+                            toplevel: false,
+                            ..path.origin().into_owned()
+                        };
+                        StorePath::parse(new_origin, new_path).ok_or_else(|| {
+                            ErrorKind::ParseStorePath(url.clone(), new_path.to_string()).into()
+                        })
+                    })
+                    .collect::<Result<Vec<_>>>()?;
             }
 
             if line.starts_with(store_path) {
@@ -210,9 +216,11 @@ pub fn fetch_files<'a, C: Connect>(
     let url_generic = format!("{}/{}.ls", cache_url, path.hash());
     let name = format!("{}.json", path.hash());
 
-    let fetched = fetch(url_xz, client, Some(SupportedEncoding::Xz)).and_then(move |(url, r)| match r {
-        Some(v) => Either::A(future::ok((url, Some(v)))),
-        None => Either::B(fetch(url_generic, client, None)),
+    let fetched = fetch(url_xz, client, Some(SupportedEncoding::Xz)).and_then(move |(url, r)| {
+        match r {
+            Some(v) => Either::A(future::ok((url, Some(v)))),
+            None => Either::B(fetch(url_generic, client, None)),
+        }
     });
 
     let parse_response = move |(url, res)| {
@@ -225,10 +233,8 @@ pub fn fetch_files<'a, C: Connect>(
 
         let now = Instant::now();
         let response: FileListingResponse = serde_json::from_slice(&contents).chain_err(|| {
-                           ErrorKind::ParseResponse(url,
-                                                    util::write_temp_file("file_listing.json",
-                                                                          &contents))
-                       })?;
+                ErrorKind::ParseResponse(url, util::write_temp_file("file_listing.json", &contents))
+            })?;
         let duration = now.elapsed();
 
         if duration > Duration::from_millis(2000) {

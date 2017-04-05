@@ -363,11 +363,11 @@ impl<R: BufRead> Decoder<R> {
             self.shared_len = self.shared_len
                 .checked_add(diff)
                 .ok_or_else(|| {
-                                ErrorKind::SharedOverflow {
-                                    shared_len: self.shared_len,
-                                    diff: diff,
-                                }
-                            })?;
+                    ErrorKind::SharedOverflow {
+                        shared_len: self.shared_len,
+                        diff: diff,
+                    }
+                })?;
 
             // Copy the shared prefix
             if !self.copy_shared()? {

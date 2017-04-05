@@ -136,11 +136,11 @@ impl FileNode<()> {
                     .ok()
                     .and_then(|s| s.parse().ok())
                     .map(|size| {
-                             Regular {
-                                 executable: executable,
-                                 size: size,
-                             }
-                         })
+                        Regular {
+                            executable: executable,
+                            size: size,
+                        }
+                    })
             }
                           b's' => Some(Symlink { target: ByteBuf::from(buf) }),
                           b'd' => {
@@ -148,11 +148,11 @@ impl FileNode<()> {
                                   .ok()
                                   .and_then(|s| s.parse().ok())
                                   .map(|size| {
-                                           Directory {
-                                               size: size,
-                                               contents: (),
-                                           }
-                                       })
+                Directory {
+                    size: size,
+                    contents: (),
+                }
+            })
                           }
                           _ => None,
                       })
@@ -187,11 +187,11 @@ impl FileTreeEntry {
             let path = &buf[(sep + 1)..];
             let node = &buf[0..sep];
             FileNode::decode(node).map(|node| {
-                                           FileTreeEntry {
-                                               path: path.to_vec(),
-                                               node: node,
-                                           }
-                                       })
+                FileTreeEntry {
+                    path: path.to_vec(),
+                    node: node,
+                }
+            })
         })
     }
 }

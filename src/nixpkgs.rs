@@ -123,11 +123,11 @@ impl<R: Read> PackagesParser<R> {
                             .into_iter()
                             .find(|a| a.name.local_name == "attrPath");
                         let attr_path = attr_path.ok_or_else(|| {
-                                            self.err(MissingAttribute {
-                                                         element_name: "item".into(),
-                                                         attribute_name: "attrPath".into(),
-                                                     })
-                                        })?;
+                                self.err(MissingAttribute {
+                                             element_name: "item".into(),
+                                             attribute_name: "attrPath".into(),
+                                         })
+                            })?;
 
                         self.current_item = Some(attr_path.value);
                         continue;
@@ -151,18 +151,18 @@ impl<R: Read> PackagesParser<R> {
                             }
 
                             let output_name = output_name.ok_or_else(|| {
-                                                self.err(MissingAttribute {
-                                                             element_name: "output".into(),
-                                                             attribute_name: "name".into(),
-                                                         })
-                                            })?;
+                                    self.err(MissingAttribute {
+                                                 element_name: "output".into(),
+                                                 attribute_name: "name".into(),
+                                             })
+                                })?;
 
                             let output_path = output_path.ok_or_else(|| {
-                                                self.err(MissingAttribute {
-                                                             element_name: "output".into(),
-                                                             attribute_name: "path".into(),
-                                                         })
-                                            })?;
+                                    self.err(MissingAttribute {
+                                                 element_name: "output".into(),
+                                                 attribute_name: "path".into(),
+                                             })
+                                })?;
 
                             let origin = PathOrigin {
                                 attr: item,
@@ -172,8 +172,8 @@ impl<R: Read> PackagesParser<R> {
                             let store_path = StorePath::parse(origin, &output_path);
                             let store_path =
                                 store_path.ok_or_else(|| {
-                                                    self.err(InvalidStorePath { path: output_path })
-                                                })?;
+                                        self.err(InvalidStorePath { path: output_path })
+                                    })?;
 
                             return Ok(Some(store_path));
                         } else {
@@ -295,13 +295,13 @@ impl<R: Read> Iterator for PackagesQuery<R> {
                 parser
                     .next()
                     .map(|v| {
-                             self.parser = Some(parser);
-                             v.map_err(|e| self.check_error().unwrap_or_else(|| Error::from(e)))
-                         })
+                        self.parser = Some(parser);
+                        v.map_err(|e| self.check_error().unwrap_or_else(|| Error::from(e)))
+                    })
                     .or_else(|| {
-                                 self.parser = None;
-                                 self.check_error().map(Err)
-                             })
+                        self.parser = None;
+                        self.check_error().map(Err)
+                    })
             })
     }
 }

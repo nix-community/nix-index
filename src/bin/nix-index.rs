@@ -137,11 +137,11 @@ impl<'a, S> Fetcher<'a, S>
                 };
 
                 Ok(fetch.then(move |r| {
-                                  future::result(match r {
-                                                     Err(e) => Err(Error::FetchFiles(path, e)),
-                                                     Ok(files) => Ok((path, files)),
-                                                 })
-                              }))
+                    future::result(match r {
+                                       Err(e) => Err(Error::FetchFiles(path, e)),
+                                       Ok(files) => Ok((path, files)),
+                                   })
+                }))
             })
         };
 
@@ -165,8 +165,8 @@ impl<'a, S> Fetcher<'a, S>
                 let fetch = {
                     let path = path.clone();
                     self.retry(move || {
-                                   hydra::fetch_references(CACHE_URL, self.client, path.clone())
-                               })
+                        hydra::fetch_references(CACHE_URL, self.client, path.clone())
+                    })
                 };
 
                 fetch.then(move |e| {
@@ -204,13 +204,13 @@ fn try_load_paths_cache() -> Result<Option<PackageStream>, Error> {
     let workset = WorkSet::from_iter(fetched
                                          .into_iter()
                                          .map(|(path, tree)| {
-                                                  (path.hash().to_string(), (path, Some(tree)))
-                                              }));
+        (path.hash().to_string(), (path, Some(tree)))
+    }));
     let watch = workset.watch();
     let stream = workset.then(|r| {
-                                  let (_handle, v) = r.void_unwrap();
-                                  future::ok(v)
-                              });
+        let (_handle, v) = r.void_unwrap();
+        future::ok(v)
+    });
 
     Ok(Some((Box::new(stream), watch)))
 }
@@ -364,11 +364,10 @@ fn main() {
         .get_matches();
 
     run(&matches, &mut lp, &client).unwrap_or_else(|e| {
-                                                       if let Error::Args(e) = e {
-                                                           e.exit()
-                                                       }
-                                                       writeln!(&mut io::stderr(), "{}", e)
-                                                           .unwrap();
-                                                       process::exit(2);
-                                                   });
+        if let Error::Args(e) = e {
+            e.exit()
+        }
+        writeln!(&mut io::stderr(), "{}", e).unwrap();
+        process::exit(2);
+    });
 }
