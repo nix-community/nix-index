@@ -16,9 +16,8 @@ use serde::de::{Deserialize, Deserializer, MapVisitor, Visitor};
 use serde::bytes::ByteBuf;
 use hyper::client::{Client, Response, Connect};
 use hyper::{self, Uri, StatusCode};
-use hyper::header::{ContentType, ContentEncoding, Encoding};
+use hyper::header::{ContentEncoding, Encoding, Headers};
 use brotli2::write::BrotliDecoder;
-use mime::{Mime};
 
 use files::FileTree;
 use package::{StorePath, PathOrigin};
@@ -45,15 +44,13 @@ error_chain! {
             description("decoder error")
             display("response to GET '{}' could not be decoded", url)
         }
-        UnsupportedEncoding(url: String, encoding: Option<ContentEncoding>, typ: Option<ContentType>) {
-            description("unsupported content-encoding/type")
-                display(
-                    "response to GET '{}' had unsupported content-encoding ({}) and content-type ({}) \
-                     combination ",
-                    url,
-                    encoding.as_ref().map_or("not present".to_string(), |v| format!("'{}'", v)),
-                    typ.as_ref().map_or("not present".to_string(), |v| format!("'{}'", v)),
-                )
+        UnsupportedEncoding(url: String, encoding: Option<ContentEncoding>) {
+            description("unsupported content-encoding")
+            display(
+                "response to GET '{}' had unsupported content-encoding ({})",
+                url,
+                encoding.as_ref().map_or("not present".to_string(), |v| format!("'{}'", v)),
+            )
         }
     }
     foreign_links {
@@ -61,80 +58,95 @@ error_chain! {
     }
 }
 
-fn fetch<'a, C: Connect>(url: String, client: &'a Client<C>) -> Box<Future<Item = (String, Option<Vec<u8>>), Error = Error> + 'a> {
+enum SupportedEncoding {
+    Xz,
+    Brotli,
+    Identity,
+}
+
+fn compute_encoding(headers: &Headers) -> Option<SupportedEncoding> {
+    let empty = ContentEncoding(vec![]);
+    let &ContentEncoding(ref encodings) = headers.get::<ContentEncoding>().unwrap_or(&empty);
+
+    let identity = Encoding::Identity;
+    let encoding = encodings.get(0).unwrap_or(&identity);
+    match *encoding {
+        Encoding::Brotli => Some(SupportedEncoding::Brotli),
+        Encoding::Identity => Some(SupportedEncoding::Identity),
+        Encoding::EncodingExt(ref ext) if ext == "xz" => Some(SupportedEncoding::Xz),
+        _ => None,
+    }
+}
+
+
+fn fetch<'a, C: Connect>(
+    url: String,
+    client: &'a Client<C>,
+    encoding: Option<SupportedEncoding>,
+) -> Box<Future<Item = (String, Option<Vec<u8>>), Error = Error> + 'a> {
     let uri = Uri::from_str(&url).map_err(|e| Error::from(hyper::Error::from(e)));
     let process_response = move |res: Response| {
         let code = res.status();
-        
+
         if code == StatusCode::NotFound {
-            return Either::A(future::ok((url, None)))
+            return Either::A(future::ok((url, None)));
         }
 
         if !code.is_success() {
             return Either::A(future::err(Error::from(ErrorKind::Http(url, code))));
         }
 
-        let (type_binary, type_json) = match res.headers().get::<ContentType>() {
-            Some(&ContentType(Mime(ref top, ref sub, _))) => {
-                let binary = top.as_str() == "binary" && sub.as_str() == "octet-stream";
-                let json = (top.as_str() == "application" || top.as_str() == "text") && sub.as_str() == "json";
-                (binary, json)
+        let encoding = match encoding.or_else(|| compute_encoding(res.headers())) {
+            Some(e) => e,
+            None => return Either::A(future::err (
+                ErrorKind::UnsupportedEncoding(url, res.headers().get::<ContentEncoding>().cloned()).into()
+            )),
+        };
+
+        use self::SupportedEncoding::*;
+        let decoded = match encoding {
+            Xz => {
+                let body = res.body().map_err(Error::from);
+                Either::A(body.fold((url, XzDecoder::new(Vec::new())),
+                                    move |(url, mut decoder), chunk| {
+                                        decoder
+                                            .write_all(&chunk)
+                                            .chain_err(|| ErrorKind::Decode(url.clone()))
+                                            .map(move |_| (url, decoder))
+                                    })
+                              .and_then(|(url, mut d)| {
+                                            d.finish()
+                                                .chain_err(|| ErrorKind::Decode(url.clone()))
+                                                .map(move |v| (url, v))
+                                        }))
             }
-            _ => (false, false),
-        };
 
-        let (encoding_xz, encoding_brotli, encoding_identity) = match res.headers().get::<ContentEncoding>() {
-            Some(ref encodings) if encodings.len() == 1 => {
-                let encoding = &encodings[0];
-                match *encoding {
-                    Encoding::EncodingExt(ref e) if e == "xz" => (true, false, false),
-                    Encoding::Brotli => (false, true, false),
-                    Encoding::Identity => (false, false, true),
-                    _ => (false, false, false),
-                }
-            },
-            _ => (false, false, false)
-        };
-        let has_encoding = res.headers().has::<ContentEncoding>();
+            Brotli => {
+                let body = res.body().map_err(Error::from);
 
-        let decoded = {
-            if type_binary && url.ends_with(".xz") || type_json && encoding_xz {
-                let body = res.body().map_err(Error::from);
-                Either::A(
-                    body.fold((url, XzDecoder::new(Vec::new())), move |(url, mut decoder), chunk| {
-                        decoder.write_all(&chunk)
-                            .chain_err(|| ErrorKind::Decode(url.clone()))
-                            .map(move |_| (url, decoder))
-                    }).and_then(|(url, mut d)| {
-                        d.finish()
-                            .chain_err(|| ErrorKind::Decode(url.clone()))
-                            .map(move |v| (url, v) )
-                    })
-                )
-            } else if type_json && encoding_brotli {
-                let body = res.body().map_err(Error::from);
-                Either::B(Either::A(
-                    body.fold((url, BrotliDecoder::new(Vec::new())), move |(url, mut decoder), chunk| {
-                        decoder.write_all(&chunk)
-                            .chain_err(|| ErrorKind::Decode(url.clone()))
-                            .map(move |_| (url, decoder))
-                    }).and_then(|(url, mut d)| {
-                        d.finish()
+                Either::B(Either::A(body.fold((url, BrotliDecoder::new(Vec::new())),
+                                              move |(url, mut decoder), chunk| {
+                                                  decoder
+                                                      .write_all(&chunk)
+                                                      .chain_err(|| {
+                                                                     ErrorKind::Decode(url.clone())
+                                                                 })
+                                                      .map(move |_| (url, decoder))
+                                              })
+                                        .and_then(|(url, mut d)| {
+                                                      d.finish()
                             .chain_err(|| ErrorKind::Decode(url.clone()))
                             .map(move |v| (url, v))
-                    })
-                ))
-            } else if encoding_identity || !has_encoding {
+                                                  })))
+            }
+
+            Identity => {
                 let body = res.body().map_err(Error::from);
                 let decoded = body.fold(Vec::new(), |mut v, chunk| {
                     v.extend_from_slice(&chunk);
                     Ok(v) as Result<_>
                 });
                 Either::B(Either::B(decoded.map(move |r| (url, r))))
-            } else {
-                let encoding = res.headers().get::<ContentEncoding>().cloned();
-                let typ = res.headers().get::<ContentType>().cloned();
-                return Either::A(future::err(ErrorKind::UnsupportedEncoding(url, encoding, typ).into()))
             }
         };
 
@@ -142,10 +154,13 @@ fn fetch<'a, C: Connect>(url: String, client: &'a Client<C>) -> Box<Future<Item 
         Either::B(decoded.map(|(url, v)| (url, Some(v))))
     };
 
-    Box::new(future::result(uri).and_then(move |u| client.get(u).from_err()).and_then(process_response))
+    Box::new(future::result(uri)
+                 .and_then(move |u| client.get(u).from_err())
+                 .and_then(process_response))
 }
 
-pub fn fetch_references<'a, C: Connect> (
+pub fn fetch_references<'a, C: Connect>
+    (
     cache_url: &str,
     client: &'a Client<C>,
     mut path: StorePath,
@@ -156,7 +171,7 @@ pub fn fetch_references<'a, C: Connect> (
         let url: String = url;
         let data: Vec<u8> = match data {
             Some(v) => v,
-            None => return Ok((path, vec![]))
+            None => return Ok((path, vec![])),
         };
         let references = b"References:";
         let store_path = b"StorePath:";
@@ -183,22 +198,21 @@ pub fn fetch_references<'a, C: Connect> (
         Ok((path, result))
     };
 
-    Box::new(fetch(url, client).and_then(move |x| parse_response(x)))
+    Box::new(fetch(url, client, None).and_then(move |x| parse_response(x)))
 }
 
 pub fn fetch_files<'a, C: Connect>(
     cache_url: &str,
     client: &'a Client<C>,
     path: &StorePath,
-
 ) -> Box<Future<Item = Option<FileTree>, Error = Error> + 'a> {
     let url_xz = format!("{}/{}.ls.xz", cache_url, path.hash());
-    let url_br = format!("{}/{}.ls", cache_url, path.hash());
+    let url_generic = format!("{}/{}.ls", cache_url, path.hash());
     let name = format!("{}.json", path.hash());
 
-    let fetched = fetch(url_xz, client).and_then(move |(url, r)| match r {
+    let fetched = fetch(url_xz, client, Some(SupportedEncoding::Xz)).and_then(move |(url, r)| match r {
         Some(v) => Either::A(future::ok((url, Some(v)))),
-        None => Either::B(fetch(url_br, client)),
+        None => Either::B(fetch(url_generic, client, None)),
     });
 
     let parse_response = move |(url, res)| {
@@ -211,25 +225,26 @@ pub fn fetch_files<'a, C: Connect>(
 
         let now = Instant::now();
         let response: FileListingResponse = serde_json::from_slice(&contents).chain_err(|| {
-            ErrorKind::ParseResponse (
-                url,
-                util::write_temp_file("file_listing.json", &contents)
-            )
-        })?;
+                           ErrorKind::ParseResponse(url,
+                                                    util::write_temp_file("file_listing.json",
+                                                                          &contents))
+                       })?;
         let duration = now.elapsed();
 
         if duration > Duration::from_millis(2000) {
             let secs = duration.as_secs();
             let millis = duration.subsec_nanos() / 1000000;
-            
+
             writeln!(&mut io::stderr(),
                      "warning: took a long time to parse: {}s:{:03}ms",
                      secs,
-                     millis).unwrap_or(());
+                     millis)
+                    .unwrap_or(());
             if let Some(p) = util::write_temp_file(&name, &contents) {
                 writeln!(&mut io::stderr(),
                          "saved response to file: {}",
-                         p.to_string_lossy()).unwrap_or(());
+                         p.to_string_lossy())
+                        .unwrap_or(());
             }
         }
 
@@ -259,7 +274,10 @@ impl Deserialize for HydraFileListing {
                 write!(f, "a file listing (map)")
             }
 
-            fn visit_map<V: MapVisitor>(self, mut visitor: V) -> result::Result<FileTree, V::Error> {
+            fn visit_map<V: MapVisitor>(
+                self,
+                mut visitor: V,
+            ) -> result::Result<FileTree, V::Error> {
                 const VARIANTS: &'static [&'static str] = &["regular", "directory", "symlink"];
 
                 let mut typ: Option<ByteBuf> = None;
@@ -336,4 +354,3 @@ impl Deserialize for HydraFileListing {
         d.deserialize_map(Root).map(HydraFileListing)
     }
 }
-
