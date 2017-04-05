@@ -97,7 +97,7 @@ impl fmt::Display for Error {
                        "error while fetching references for path {}: {}",
                        path.as_str(),
                        e)?;
-                
+
                 if let RetryError::OperationError(ref e) = *e {
                     for e in e.iter().skip(1) {
                         write!(f, "\ncaused by: {}", e)?;
@@ -302,7 +302,11 @@ fn update_index(args: &Args, lp: &mut Core, client: &Client<HttpConnector>) -> R
     Ok(())
 }
 
-fn run<'a>(matches: &ArgMatches<'a>, lp: &mut Core, client: &Client<HttpConnector>) -> Result<(), Error> {
+fn run<'a>(
+    matches: &ArgMatches<'a>,
+    lp: &mut Core,
+    client: &Client<HttpConnector>,
+) -> Result<(), Error> {
     let args = Args {
         jobs: value_t!(matches.value_of("requests"), usize)?,
         database: PathBuf::from(matches.value_of("database").unwrap()),
@@ -360,11 +364,11 @@ fn main() {
         .get_matches();
 
     run(&matches, &mut lp, &client).unwrap_or_else(|e| {
-                                                        if let Error::Args(e) = e {
-                                                            e.exit()
-                                                        }
-                                                        writeln!(&mut io::stderr(), "{}", e)
-                                                            .unwrap();
-                                                        process::exit(2);
-                                                    });
+                                                       if let Error::Args(e) = e {
+                                                           e.exit()
+                                                       }
+                                                       writeln!(&mut io::stderr(), "{}", e)
+                                                           .unwrap();
+                                                       process::exit(2);
+                                                   });
 }

@@ -472,8 +472,7 @@ impl<W: Write> Encoder<W> {
     pub fn write_meta(&mut self, meta: &[u8]) -> io::Result<()> {
         assert!(!meta.contains(&b'\x00'),
                 "entry must not contain null bytes");
-        assert!(!meta.contains(&b'\n'),
-                "entry must not contain newlines");
+        assert!(!meta.contains(&b'\n'), "entry must not contain newlines");
 
         self.writer.write_all(meta)?;
         Ok(())
@@ -493,8 +492,7 @@ impl<W: Write> Encoder<W> {
     pub fn write_path(&mut self, path: Vec<u8>) -> io::Result<()> {
         assert!(!path.contains(&b'\x00'),
                 "entry must not contain null bytes");
-        assert!(!path.contains(&b'\x00'),
-                "entry must not contain newlines");
+        assert!(!path.contains(&b'\x00'), "entry must not contain newlines");
         self.writer.write_all(&[b'\x00'])?;
 
         let mut shared: isize = 0;
