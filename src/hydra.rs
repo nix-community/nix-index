@@ -1,3 +1,8 @@
+/// Interacting with hydra and the binary cache.
+///
+/// This module has all functions that deal with accessing hydra or the binary cache.
+/// Currently, it only provides two functions: `fetch_files` to get the file listing for
+/// a store path and `fetch_references` to retrieve the references from the narinfo.
 use serde;
 use serde_json;
 use super::util;
@@ -58,12 +63,26 @@ error_chain! {
     }
 }
 
+/// This enum lists the compression algorithms that we support for responses from hydra.
 enum SupportedEncoding {
+    /// File listings used to be xz encoded, so we have to support this.
+    /// Nar's themselves still use the xz compression.
     Xz,
+
+    /// The new format for file lisitings uses brotli compression.
     Brotli,
+
+    /// This indicates that there is no compression at all, for example
+    /// used for `.narinfo`s.
     Identity,
 }
 
+/// Reads the encoding of the response from the request headers.
+///
+/// If the request headers indicate an unsupported encoding, this function returns `None`.
+///
+/// If there is no `Content-Encoding` header we assume that the content is encoded with
+/// the `Identity` variant (i.e. there is no compression at all).
 fn compute_encoding(headers: &Headers) -> Option<SupportedEncoding> {
     let empty = ContentEncoding(vec![]);
     let &ContentEncoding(ref encodings) = headers.get::<ContentEncoding>().unwrap_or(&empty);
@@ -78,7 +97,14 @@ fn compute_encoding(headers: &Headers) -> Option<SupportedEncoding> {
     }
 }
 
-
+/// Sends a GET request to the given URL and decodes the response with the given encoding.
+///
+/// If `encoding` is `None`, then the encoding will be detected automatically by reading
+/// the `Content-Encoding` header.
+///
+/// The returned future resolves to `(url, None)` if the server returned a 404 error. On any
+/// other error, the future resolves to an error. If the request was successful, it returns
+/// `(url, Some(response_content))`.
 fn fetch<'a, C: Connect>(
     url: String,
     client: &'a Client<C>,
@@ -96,6 +122,9 @@ fn fetch<'a, C: Connect>(
             return Either::A(future::err(Error::from(ErrorKind::Http(url, code))));
         }
 
+
+        // Determine the encoding. Uses the provided encoding or an encoding computed
+        // from the response headers.
         let encoding = match encoding.or_else(|| compute_encoding(res.headers())) {
             Some(e) => e,
             None => return Either::A(future::err (
@@ -104,47 +133,55 @@ fn fetch<'a, C: Connect>(
         };
 
         use self::SupportedEncoding::*;
+
         let decoded = match encoding {
             Xz => {
-                let body = res.body().map_err(Error::from);
-                Either::A(body.fold((url, XzDecoder::new(Vec::new())),
-                                    move |(url, mut decoder), chunk| {
+                let result = res.body()
+                    .map_err(Error::from)
+                    .fold((url, XzDecoder::new(Vec::new())),
+                          move |(url, mut decoder), chunk| {
                         decoder
                             .write_all(&chunk)
                             .chain_err(|| ErrorKind::Decode(url.clone()))
                             .map(move |_| (url, decoder))
                     })
-                              .and_then(|(url, mut d)| {
-                    d.finish()
-                        .chain_err(|| ErrorKind::Decode(url.clone()))
-                        .map(move |v| (url, v))
-                }))
+                    .and_then(|(url, mut d)| {
+                        d.finish()
+                            .chain_err(|| ErrorKind::Decode(url.clone()))
+                            .map(move |v| (url, v))
+                    });
+
+                Either::A(result)
             }
 
             Brotli => {
-                let body = res.body().map_err(Error::from);
-
-                Either::B(Either::A(body.fold((url, BrotliDecoder::new(Vec::new())),
-                                              move |(url, mut decoder), chunk| {
+                let result = res.body()
+                    .map_err(Error::from)
+                    .fold((url, BrotliDecoder::new(Vec::new())),
+                          move |(url, mut decoder), chunk| {
                         decoder
                             .write_all(&chunk)
                             .chain_err(|| ErrorKind::Decode(url.clone()))
                             .map(move |_| (url, decoder))
                     })
-                                        .and_then(|(url, mut d)| {
-                    d.finish()
-                        .chain_err(|| ErrorKind::Decode(url.clone()))
-                        .map(move |v| (url, v))
-                })))
+                    .and_then(|(url, mut d)| {
+                        d.finish()
+                            .chain_err(|| ErrorKind::Decode(url.clone()))
+                            .map(move |v| (url, v))
+                    });
+
+                Either::B(Either::A(result))
             }
 
             Identity => {
-                let body = res.body().map_err(Error::from);
-                let decoded = body.fold(Vec::new(), |mut v, chunk| {
-                    v.extend_from_slice(&chunk);
-                    Ok(v) as Result<_>
-                });
-                Either::B(Either::B(decoded.map(move |r| (url, r))))
+                let result = res.body()
+                    .map_err(Error::from)
+                    .fold(Vec::new(), |mut v, chunk| {
+                        v.extend_from_slice(&chunk);
+                        Ok(v) as Result<_>
+                    })
+                    .map(move |r| (url, r));
+                Either::B(Either::B(result))
             }
         };
 
@@ -157,6 +194,12 @@ fn fetch<'a, C: Connect>(
                  .and_then(process_response))
 }
 
+/// Fetches the references of a given store path.
+///
+/// Returns the references of the store path and the store path itself. Note that this
+/// function only requires the hash part of the store path that is passed as argument,
+/// but it will return a full store path as a result. So you can use this function to
+/// resolve hashes to full store paths as well.
 pub fn fetch_references<'a, C: Connect>
     (
     cache_url: &str,
@@ -207,6 +250,9 @@ pub fn fetch_references<'a, C: Connect>
     Box::new(fetch(url, client, None).and_then(move |x| parse_response(x)))
 }
 
+/// Fetches the file listing for the given store path.
+///
+/// A file listing is a tree of the files that the given store path contains.
 pub fn fetch_files<'a, C: Connect>(
     cache_url: &str,
     client: &'a Client<C>,
@@ -261,18 +307,34 @@ pub fn fetch_files<'a, C: Connect>(
 
 }
 
+/// This data type represents the format of the `.ls` files fetched from the binary cache.
+///
+/// The `.ls` file contains a JSON object. The structure of that object is mirrored by this
+/// struct for parsing the file.
 #[derive(Deserialize, Debug, PartialEq)]
 struct FileListingResponse {
+    /// Each `.ls` file has a "root" key that contains the file listing.
     root: HydraFileListing,
 }
 
+/// A wrapper for `FileTree` so that we can add trait implementations for it.
+///
+/// (`FileTree` is defined in another module, so we cannot directly implement `Deserialize` for
+/// `FileTree` since that would be an orphan impl).
 #[derive(Debug, PartialEq)]
 struct HydraFileListing(FileTree);
 
+/// We need a manual implementation for Deserialize here because file lisitings can contain non-unicode
+/// bytes so we need to explicitly request that keys be deserialized as ByteBuf and not String.
+///
+/// We cannot use the serde-derive machinery because the `tagged` enum variant does not support map keys
+/// that aren't valid unicode (since it relies on the Deserializer to tell it the type, and the JSON Deserializer
+/// will default to String for map keys).
 impl Deserialize for HydraFileListing {
     fn deserialize<D: Deserializer>(d: D) -> result::Result<HydraFileListing, D::Error> {
         struct Root;
 
+        // The visitor that implements derialization for a file tree
         impl Visitor for Root {
             type Value = FileTree;
 
@@ -286,6 +348,9 @@ impl Deserialize for HydraFileListing {
             ) -> result::Result<FileTree, V::Error> {
                 const VARIANTS: &'static [&'static str] = &["regular", "directory", "symlink"];
 
+                // These will get filled in as we visit the map.
+                // Note that not all of them will be available, depending on the `type` of the file listing
+                // (`directory`, `symlink` or `regular`)
                 let mut typ: Option<ByteBuf> = None;
                 let mut size: Option<u64> = None;
                 let mut executable: Option<bool> = None;
@@ -325,11 +390,14 @@ impl Deserialize for HydraFileListing {
                             target = Some(try!(visitor.visit_value()))
                         }
                         _ => {
+                            // We ignore all other fields to be more robust against changes in
+                            // the format
                             try!(visitor.visit_value::<serde::de::impls::IgnoredAny>());
                         }
                     }
                 }
 
+                // the type field must always be present so we know which type to expect
                 let typ = &try!(typ.ok_or_else(|| serde::de::Error::missing_field("type"))) as
                           &[u8];
 
