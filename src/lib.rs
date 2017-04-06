@@ -9,6 +9,8 @@ extern crate rustc_serialize;
 extern crate serde;
 extern crate serde_json;
 extern crate tokio_core;
+extern crate tokio_timer;
+extern crate tokio_retry;
 extern crate void;
 extern crate xml;
 extern crate zstd;

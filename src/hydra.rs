@@ -19,10 +19,14 @@ use futures::future::{self, Either};
 use xz2::write::XzDecoder;
 use serde::de::{Deserialize, Deserializer, MapVisitor, Visitor};
 use serde::bytes::ByteBuf;
-use hyper::client::{Client, Response, Connect};
+use hyper::client::{Client, Response, Connect, HttpConnector};
 use hyper::{self, Uri, StatusCode};
 use hyper::header::{ContentEncoding, Encoding, Headers};
 use brotli2::write::BrotliDecoder;
+use tokio_timer::{self, Timer, TimeoutError, TimerError};
+use tokio_retry::strategies::FixedInterval;
+use tokio_retry::{RetryError, RetryStrategy};
+use tokio_core::reactor::{Handle};
 
 use files::FileTree;
 use package::{StorePath, PathOrigin};
@@ -57,13 +61,280 @@ error_chain! {
                 encoding.as_ref().map_or("not present".to_string(), |v| format!("'{}'", v)),
             )
         }
+        Timeout {
+            description("timeout exceeded")
+        }
     }
     foreign_links {
         Hyper(hyper::Error);
+        Timer(TimerError);
+    }
+}
+
+impl<T> From<TimeoutError<T>> for Error {
+    fn from(err: TimeoutError<T>) -> Error {
+        use self::TimeoutError::*;
+        match err {
+            Timer(_, e) => Error::from(e),
+            TimedOut(_) => Error::from(ErrorKind::Timeout)
+        } 
+    }
+}
+
+impl From<RetryError<Error, TimerError>> for Error {
+    fn from(err: RetryError<Error, TimerError>) -> Error {
+        use self::RetryError::*;
+        match err {
+            TimerError(e) => Error::from(e),
+            OperationError(e) => e,
+        }
+    }
+}
+
+/// A Fetcher allows you to make requests to Hydra/the binary cache.
+///
+/// It holds all the relevant state for performing requests, such as for example
+/// the HTTP client instance and a timer for timeouts.
+///
+/// You should use a single instance of this struct to make all your hydra/binary cache
+/// requests.
+pub struct Fetcher {
+    client: Client<HttpConnector>,
+    timer: Timer,
+    cache_url: String,
+}
+
+const RESPONSE_TIMEOUT_MS: u64 = 1000;
+
+impl Fetcher {
+    /// Initializes a new instance of the `Fetcher` struct.
+    ///
+    /// The `handle` argument is a Handle to the tokio event loop.
+    ///
+    /// `cache_url` specifies the URL of the binary cache (example: `https://cache.nixos.org`).
+    pub fn new(cache_url: String, handle: Handle) -> Fetcher {
+        let client = Client::new(&handle);
+        let timer = tokio_timer::wheel().build();
+        Fetcher {
+            client: client,
+            timer: timer,
+            cache_url: cache_url,
+        }
+    }
+
+    /// Sends a GET request to the given URL and decodes the response with the given encoding.
+    ///
+    /// If `encoding` is `None`, then the encoding will be detected automatically by reading
+    /// the `Content-Encoding` header.
+    ///
+    /// The returned future resolves to `(url, None)` if the server returned a 404 error. On any
+    /// other error, the future resolves to an error. If the request was successful, it returns
+    /// `(url, Some(response_content))`.
+    ///
+    /// This function will automatically retry the request some times to avoid intermittent network
+    /// failures.
+    fn fetch<'a>(&'a self, url: String, encoding: Option<SupportedEncoding>)
+                 -> Box<Future<Item = (String, Option<Vec<u8>>), Error = Error> + 'a> {
+        let strategy = FixedInterval::new(Duration::from_millis(500)).limit_retries(20);
+        Box::new(strategy.run(self.timer.clone(), move || {
+            self.fetch_noretry(url.clone(), encoding)
+        }).from_err())
+    }
+
+    /// The implementation of `fetch`, without the retry logic.
+    fn fetch_noretry<'a>(&'a self, url: String, encoding: Option<SupportedEncoding>) ->
+        Box<Future<Item = (String, Option<Vec<u8>>), Error = Error> + 'a> {
+        let uri = Uri::from_str(&url).map_err(|e| Error::from(hyper::Error::from(e)));
+        let process_response = move |res: Response| {
+            let code = res.status();
+    
+            if code == StatusCode::NotFound {
+                return Either::A(future::ok((url, None)));
+            }
+    
+            if !code.is_success() {
+                return Either::A(future::err(Error::from(ErrorKind::Http(url, code))));
+            }
+    
+    
+            // Determine the encoding. Uses the provided encoding or an encoding computed
+            // from the response headers.
+            let encoding = match encoding.or_else(|| compute_encoding(res.headers())) {
+                Some(e) => e,
+                None => return Either::A(future::err (
+                    ErrorKind::UnsupportedEncoding(url, res.headers().get::<ContentEncoding>().cloned()).into()
+                )),
+            };
+
+            let content = self.timer.timeout_stream(res.body().map_err(Error::from), Duration::from_millis(RESPONSE_TIMEOUT_MS));
+    
+            use self::SupportedEncoding::*;
+            let decoded = match encoding {
+                Xz => {
+                    let result = content
+                        .fold((url, XzDecoder::new(Vec::new())),
+                              move |(url, mut decoder), chunk| {
+                            decoder
+                                .write_all(&chunk)
+                                .chain_err(|| ErrorKind::Decode(url.clone()))
+                                .map(move |_| (url, decoder))
+                        })
+                        .and_then(|(url, mut d)| {
+                            d.finish()
+                                .chain_err(|| ErrorKind::Decode(url.clone()))
+                                .map(move |v| (url, v))
+                        });
+    
+                    Either::A(result)
+                }
+    
+                Brotli => {
+                    let result = content
+                        .fold((url, BrotliDecoder::new(Vec::new())),
+                              move |(url, mut decoder), chunk| {
+                            println!("\ndecoding: {}", url);
+                            decoder
+                                .write_all(&chunk)
+                                .chain_err(|| ErrorKind::Decode(url.clone()))
+                                .map(move |_| (url, decoder))
+                        })
+                        .and_then(|(url, mut d)| {
+                            println!("\nfinished decoding: {}", url);
+                            d.finish()
+                                .chain_err(|| ErrorKind::Decode(url.clone()))
+                                .map(move |v| (url, v))
+                        });
+    
+                    Either::B(Either::A(result))
+                }
+    
+                Identity => {
+                    let result = content
+                        .fold(Vec::new(), |mut v, chunk| {
+                            v.extend_from_slice(&chunk);
+                            Ok(v) as Result<_>
+                        })
+                        .map(move |r| (url, r));
+                    Either::B(Either::B(result))
+                }
+            };
+    
+    
+            Either::B(decoded.map(|(url, v)| (url, Some(v))))
+        };
+
+        Box::new(future::result(uri).and_then(move |u| self.client.get(u).from_err()).and_then(process_response))
+    }
+
+    /// Fetches the references of a given store path.
+    ///
+    /// Returns the references of the store path and the store path itself. Note that this
+    /// function only requires the hash part of the store path that is passed as argument,
+    /// but it will return a full store path as a result. So you can use this function to
+    /// resolve hashes to full store paths as well.
+    pub fn fetch_references<'a>(&'a self, mut path: StorePath) ->
+        Box<Future<Item = (StorePath, Vec<StorePath>), Error = Error> + 'a> {
+        let url = format!("{}/{}.narinfo", self.cache_url, path.hash());
+    
+        let parse_response = move |(url, data)| {
+            let url: String = url;
+            let data: Vec<u8> = match data {
+                Some(v) => v,
+                None => return Ok((path, vec![])),
+            };
+            let references = b"References:";
+            let store_path = b"StorePath:";
+            let mut result = Vec::new();
+            for line in data.split(|x| x == &b'\n') {
+                if line.starts_with(references) {
+                    let line = &line[references.len()..];
+                    let line = str::from_utf8(line).map_err(|e| ErrorKind::Unicode(url.clone(), line.to_vec(), e))?;
+                    result = line.trim()
+                        .split_whitespace()
+                        .map(|new_path| {
+                            let new_origin = PathOrigin {
+                                toplevel: false,
+                                ..path.origin().into_owned()
+                            };
+                            StorePath::parse(new_origin, new_path).ok_or_else(|| {
+                                ErrorKind::ParseStorePath(url.clone(), new_path.to_string()).into()
+                            })
+                        })
+                        .collect::<Result<Vec<_>>>()?;
+                }
+    
+                if line.starts_with(store_path) {
+                    let line = &line[references.len()..];
+                    let line = str::from_utf8(line).map_err(|e| ErrorKind::Unicode(url.clone(), line.to_vec(), e))?;
+                    let line = line.trim();
+    
+                    path = StorePath::parse(path.origin().into_owned(), line).ok_or_else(|| ErrorKind::ParseStorePath(url.clone(), line.to_string()))?;
+                }
+            }
+    
+            Ok((path, result))
+        };
+    
+        Box::new(self.fetch(url, None).and_then(move |x| parse_response(x)))
+    }
+    
+    /// Fetches the file listing for the given store path.
+    ///
+    /// A file listing is a tree of the files that the given store path contains.
+    pub fn fetch_files<'a>(&'a self, path: &StorePath) ->
+        Box<Future<Item = Option<FileTree>, Error = Error> + 'a> {
+        let url_xz = format!("{}/{}.ls.xz", self.cache_url, path.hash());
+        let url_generic = format!("{}/{}.ls", self.cache_url, path.hash());
+        let name = format!("{}.json", path.hash());
+    
+        let fetched = self.fetch(url_generic, None).and_then(move |(url, r)| {
+            match r {
+                Some(v) => Either::A(future::ok((url, Some(v)))),
+                None => Either::B(self.fetch(url_xz, Some(SupportedEncoding::Xz))),
+            }
+        });
+    
+        let parse_response = move |(url, res)| {
+            let url: String = url;
+            let res: Option<Vec<u8>> = res;
+            let contents = match res {
+                None => return Ok(None),
+                Some(v) => v,
+            };
+    
+            let now = Instant::now();
+            let response: FileListingResponse = serde_json::from_slice(&contents).chain_err(|| {
+                    ErrorKind::ParseResponse(url, util::write_temp_file("file_listing.json", &contents))
+                })?;
+            let duration = now.elapsed();
+    
+            if duration > Duration::from_millis(2000) {
+                let secs = duration.as_secs();
+                let millis = duration.subsec_nanos() / 1000000;
+    
+                writeln!(&mut io::stderr(),
+                         "warning: took a long time to parse: {}s:{:03}ms",
+                         secs,
+                         millis)
+                        .unwrap_or(());
+                if let Some(p) = util::write_temp_file(&name, &contents) {
+                    writeln!(&mut io::stderr(),
+                             "saved response to file: {}",
+                             p.to_string_lossy())
+                            .unwrap_or(());
+                }
+            }
+    
+            Ok(Some(response.root.0))
+        };
+    
+        Box::new(fetched.and_then(parse_response))
+    
     }
 }
 
 /// This enum lists the compression algorithms that we support for responses from hydra.
+#[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord)]
 enum SupportedEncoding {
     /// File listings used to be xz encoded, so we have to support this.
     /// Nar's themselves still use the xz compression.
@@ -95,217 +366,10 @@ fn compute_encoding(headers: &Headers) -> Option<SupportedEncoding> {
         Encoding::EncodingExt(ref ext) if ext == "xz" => Some(SupportedEncoding::Xz),
         _ => None,
     }
+    
 }
 
-/// Sends a GET request to the given URL and decodes the response with the given encoding.
-///
-/// If `encoding` is `None`, then the encoding will be detected automatically by reading
-/// the `Content-Encoding` header.
-///
-/// The returned future resolves to `(url, None)` if the server returned a 404 error. On any
-/// other error, the future resolves to an error. If the request was successful, it returns
-/// `(url, Some(response_content))`.
-fn fetch<'a, C: Connect>(
-    url: String,
-    client: &'a Client<C>,
-    encoding: Option<SupportedEncoding>,
-) -> Box<Future<Item = (String, Option<Vec<u8>>), Error = Error> + 'a> {
-    let uri = Uri::from_str(&url).map_err(|e| Error::from(hyper::Error::from(e)));
-    let process_response = move |res: Response| {
-        let code = res.status();
 
-        if code == StatusCode::NotFound {
-            return Either::A(future::ok((url, None)));
-        }
-
-        if !code.is_success() {
-            return Either::A(future::err(Error::from(ErrorKind::Http(url, code))));
-        }
-
-
-        // Determine the encoding. Uses the provided encoding or an encoding computed
-        // from the response headers.
-        let encoding = match encoding.or_else(|| compute_encoding(res.headers())) {
-            Some(e) => e,
-            None => return Either::A(future::err (
-                ErrorKind::UnsupportedEncoding(url, res.headers().get::<ContentEncoding>().cloned()).into()
-            )),
-        };
-
-        use self::SupportedEncoding::*;
-
-        let decoded = match encoding {
-            Xz => {
-                let result = res.body()
-                    .map_err(Error::from)
-                    .fold((url, XzDecoder::new(Vec::new())),
-                          move |(url, mut decoder), chunk| {
-                        decoder
-                            .write_all(&chunk)
-                            .chain_err(|| ErrorKind::Decode(url.clone()))
-                            .map(move |_| (url, decoder))
-                    })
-                    .and_then(|(url, mut d)| {
-                        d.finish()
-                            .chain_err(|| ErrorKind::Decode(url.clone()))
-                            .map(move |v| (url, v))
-                    });
-
-                Either::A(result)
-            }
-
-            Brotli => {
-                let result = res.body()
-                    .map_err(Error::from)
-                    .fold((url, BrotliDecoder::new(Vec::new())),
-                          move |(url, mut decoder), chunk| {
-                        decoder
-                            .write_all(&chunk)
-                            .chain_err(|| ErrorKind::Decode(url.clone()))
-                            .map(move |_| (url, decoder))
-                    })
-                    .and_then(|(url, mut d)| {
-                        d.finish()
-                            .chain_err(|| ErrorKind::Decode(url.clone()))
-                            .map(move |v| (url, v))
-                    });
-
-                Either::B(Either::A(result))
-            }
-
-            Identity => {
-                let result = res.body()
-                    .map_err(Error::from)
-                    .fold(Vec::new(), |mut v, chunk| {
-                        v.extend_from_slice(&chunk);
-                        Ok(v) as Result<_>
-                    })
-                    .map(move |r| (url, r));
-                Either::B(Either::B(result))
-            }
-        };
-
-
-        Either::B(decoded.map(|(url, v)| (url, Some(v))))
-    };
-
-    Box::new(future::result(uri)
-                 .and_then(move |u| client.get(u).from_err())
-                 .and_then(process_response))
-}
-
-/// Fetches the references of a given store path.
-///
-/// Returns the references of the store path and the store path itself. Note that this
-/// function only requires the hash part of the store path that is passed as argument,
-/// but it will return a full store path as a result. So you can use this function to
-/// resolve hashes to full store paths as well.
-pub fn fetch_references<'a, C: Connect>
-    (
-    cache_url: &str,
-    client: &'a Client<C>,
-    mut path: StorePath,
-) -> Box<Future<Item = (StorePath, Vec<StorePath>), Error = Error> + 'a> {
-    let url = format!("{}/{}.narinfo", cache_url, path.hash());
-
-    let parse_response = move |(url, data)| {
-        let url: String = url;
-        let data: Vec<u8> = match data {
-            Some(v) => v,
-            None => return Ok((path, vec![])),
-        };
-        let references = b"References:";
-        let store_path = b"StorePath:";
-        let mut result = Vec::new();
-        for line in data.split(|x| x == &b'\n') {
-            if line.starts_with(references) {
-                let line = &line[references.len()..];
-                let line = str::from_utf8(line).map_err(|e| ErrorKind::Unicode(url.clone(), line.to_vec(), e))?;
-                result = line.trim()
-                    .split_whitespace()
-                    .map(|new_path| {
-                        let new_origin = PathOrigin {
-                            toplevel: false,
-                            ..path.origin().into_owned()
-                        };
-                        StorePath::parse(new_origin, new_path).ok_or_else(|| {
-                            ErrorKind::ParseStorePath(url.clone(), new_path.to_string()).into()
-                        })
-                    })
-                    .collect::<Result<Vec<_>>>()?;
-            }
-
-            if line.starts_with(store_path) {
-                let line = &line[references.len()..];
-                let line = str::from_utf8(line).map_err(|e| ErrorKind::Unicode(url.clone(), line.to_vec(), e))?;
-                let line = line.trim();
-
-                path = StorePath::parse(path.origin().into_owned(), line).ok_or_else(|| ErrorKind::ParseStorePath(url.clone(), line.to_string()))?;
-            }
-        }
-
-        Ok((path, result))
-    };
-
-    Box::new(fetch(url, client, None).and_then(move |x| parse_response(x)))
-}
-
-/// Fetches the file listing for the given store path.
-///
-/// A file listing is a tree of the files that the given store path contains.
-pub fn fetch_files<'a, C: Connect>(
-    cache_url: &str,
-    client: &'a Client<C>,
-    path: &StorePath,
-) -> Box<Future<Item = Option<FileTree>, Error = Error> + 'a> {
-    let url_xz = format!("{}/{}.ls.xz", cache_url, path.hash());
-    let url_generic = format!("{}/{}.ls", cache_url, path.hash());
-    let name = format!("{}.json", path.hash());
-
-    let fetched = fetch(url_generic, client, None).and_then(move |(url, r)| {
-        match r {
-            Some(v) => Either::A(future::ok((url, Some(v)))),
-            None => Either::B(fetch(url_xz, client, Some(SupportedEncoding::Xz))),
-        }
-    });
-
-    let parse_response = move |(url, res)| {
-        let url: String = url;
-        let res: Option<Vec<u8>> = res;
-        let contents = match res {
-            None => return Ok(None),
-            Some(v) => v,
-        };
-
-        let now = Instant::now();
-        let response: FileListingResponse = serde_json::from_slice(&contents).chain_err(|| {
-                ErrorKind::ParseResponse(url, util::write_temp_file("file_listing.json", &contents))
-            })?;
-        let duration = now.elapsed();
-
-        if duration > Duration::from_millis(2000) {
-            let secs = duration.as_secs();
-            let millis = duration.subsec_nanos() / 1000000;
-
-            writeln!(&mut io::stderr(),
-                     "warning: took a long time to parse: {}s:{:03}ms",
-                     secs,
-                     millis)
-                    .unwrap_or(());
-            if let Some(p) = util::write_temp_file(&name, &contents) {
-                writeln!(&mut io::stderr(),
-                         "saved response to file: {}",
-                         p.to_string_lossy())
-                        .unwrap_or(());
-            }
-        }
-
-        Ok(Some(response.root.0))
-    };
-
-    Box::new(fetched.and_then(parse_response))
-
-}
 
 /// This data type represents the format of the `.ls` files fetched from the binary cache.
 ///

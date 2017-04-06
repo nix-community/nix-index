@@ -1,3 +1,7 @@
+/// Creating and searching file databases.
+///
+/// This module implements an abstraction for creating an index of files with meta information
+/// and searching that index for paths matching a specific pattern.
 use std::io::{self, Read, Write, BufWriter, BufReader, Seek, SeekFrom};
 use std::fs::File;
 use std::path::Path;
@@ -11,6 +15,7 @@ use package::StorePath;
 use files::{FileTree, FileTreeEntry};
 use frcode;
 
+/// A writer for creating a new file database.
 pub struct Writer {
     writer: Option<BufWriter<zstd::Encoder<File>>>,
 }

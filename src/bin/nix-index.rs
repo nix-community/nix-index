@@ -12,7 +12,7 @@ extern crate xdg;
 extern crate hyper;
 
 use futures::future;
-use futures::{Future, Stream, IntoFuture};
+use futures::{Future, Stream};
 use std::fmt;
 use std::fs::{self, File};
 use std::io::{self, Write};
@@ -20,22 +20,16 @@ use std::path::PathBuf;
 use std::process;
 use std::str;
 use std::iter::FromIterator;
-use std::time::Duration;
 use tokio_core::reactor::Core;
-use tokio_retry::{RetryStrategy, RetryError, RetryFuture};
-use tokio_retry::strategies::FixedInterval;
-use tokio_timer::Timer;
-use hyper::client::{HttpConnector, Client};
 use separator::Separatable;
 use clap::{Arg, App, ArgMatches};
 use void::ResultVoidExt;
 
 use nix_index::database;
 use nix_index::files::FileTree;
-use nix_index::hydra;
+use nix_index::hydra::{self, Fetcher};
 use nix_index::package::StorePath;
 use nix_index::nixpkgs;
-use nix_index::util;
 use nix_index::workset::{WorkSet, WorkSetWatch};
 
 const CACHE_URL: &'static str = "http://cache.nixos.org";
@@ -43,8 +37,8 @@ const CACHE_URL: &'static str = "http://cache.nixos.org";
 enum Error {
     Io(io::Error),
     QueryPackages(nixpkgs::Error),
-    FetchFiles(StorePath, RetryError<hydra::Error>),
-    FetchReferences(StorePath, RetryError<hydra::Error>),
+    FetchFiles(StorePath, hydra::Error),
+    FetchReferences(StorePath, hydra::Error),
     Serialize(bincode::Error),
     Args(clap::Error),
 }
@@ -85,10 +79,8 @@ impl fmt::Display for Error {
                        "error while fetching the file listing for path {}: {}",
                        path.as_str(),
                        e)?;
-                if let RetryError::OperationError(ref e) = *e {
-                    for e in e.iter().skip(1) {
-                        write!(f, "\ncaused by: {}", e)?;
-                    }
+                for e in e.iter().skip(1) {
+                    write!(f, "\ncaused by: {}", e)?;
                 }
                 Ok(())
             }
@@ -98,10 +90,8 @@ impl fmt::Display for Error {
                        path.as_str(),
                        e)?;
 
-                if let RetryError::OperationError(ref e) = *e {
-                    for e in e.iter().skip(1) {
-                        write!(f, "\ncaused by: {}", e)?;
-                    }
+                for e in e.iter().skip(1) {
+                    write!(f, "\ncaused by: {}", e)?;
                 }
                 Ok(())
             }
@@ -111,81 +101,41 @@ impl fmt::Display for Error {
     }
 }
 
-struct Fetcher<'a, S> {
-    client: &'a Client<HttpConnector>,
-    timer: Timer,
-    retry_strategy: S,
-    jobs: usize,
-}
-
-impl<'a, S> Fetcher<'a, S>
-    where S: Clone + RetryStrategy
-{
-    fn retry<F: FnMut() -> A, A: IntoFuture>(&self, f: F) -> RetryFuture<S, A, F> {
-        self.retry_strategy.clone().run(self.timer.clone(), f)
-    }
-
-    fn try_fetch_files(
-        &'a self,
-        path: StorePath,
-    ) -> Box<Future<Item = (StorePath, Option<FileTree>), Error = Error> + 'a> {
-        let fetch_output = {
-            util::future_result(|| -> Result<_, Error> {
-                let fetch = {
-                    let path = path.clone();
-                    self.retry(move || hydra::fetch_files(CACHE_URL, self.client, &path))
-                };
-
-                Ok(fetch.then(move |r| {
-                    future::result(match r {
-                                       Err(e) => Err(Error::FetchFiles(path, e)),
-                                       Ok(files) => Ok((path, files)),
-                                   })
-                }))
-            })
-        };
-
-        Box::new(fetch_output)
-    }
-
-
-    fn try_fetch_references
-        (
-        &'a self,
-        starting_set: Vec<StorePath>,
-    ) -> (Box<Stream<Item = StorePath, Error = Error> + 'a>, WorkSetWatch) {
-        let workset = WorkSet::from_iter(starting_set
-                                             .into_iter()
-                                             .map(|x| (x.hash().into_owned(), x)));
-        let watch = workset.watch();
-
-        let stream = workset
-            .then(|r| future::ok(r.void_unwrap()))
-            .map(move |(mut handle, path)| {
-                let fetch = {
-                    let path = path.clone();
-                    self.retry(move || {
-                        hydra::fetch_references(CACHE_URL, self.client, path.clone())
-                    })
-                };
-
-                fetch.then(move |e| {
-                    future::result(match e {
-                                       Err(e) => Err(Error::FetchReferences(path, e)),
-                                       Ok((path, references)) => {
+fn fetch_file_listings<'a>(fetcher: &'a Fetcher, jobs: usize, starting_set: Vec<StorePath>) ->
+    (Box<Stream<Item = (StorePath, Option<FileTree>), Error = Error> + 'a>, WorkSetWatch) {
+    let workset = WorkSet::from_iter(starting_set
+                                     .into_iter()
+                                     .map(|x| (x.hash().into_owned(), x)));
+    let watch = workset.watch();
+    
+    let stream = workset
+        .then(|r| future::ok(r.void_unwrap()))
+        .map(move |(mut handle, path)| {
+            fetcher.fetch_references(path.clone()).then(move |e| {
+                match e {
+                    Err(e) => Err(Error::FetchReferences(path, e)),
+                    Ok((path, references)) => {
                         for reference in references {
                             let hash = reference.hash().into_owned();
                             handle.add_work(hash, reference);
                         }
                         Ok(path)
                     }
-                                   })
-                })
+                }
+            }).and_then(move |path| {
+                fetcher
+                    .fetch_files(&path)
+                    .then(move |r| {
+                        match r {
+                            Err(e) => Err(Error::FetchFiles(path, e)),
+                            Ok(files) => Ok((path, files)),
+                        }
+                    })
             })
-            .buffer_unordered(self.jobs);
+        })
+        .buffer_unordered(jobs);
 
-        (Box::new(stream), watch)
-    }
+    (Box::new(stream), watch)
 }
 
 type PackageStream = (Box<Stream<Item = (StorePath, Option<FileTree>), Error = Error>>,
@@ -223,25 +173,17 @@ struct Args {
     path_cache: bool,
 }
 
-fn update_index(args: &Args, lp: &mut Core, client: &Client<HttpConnector>) -> Result<(), Error> {
+fn update_index(args: &Args, lp: &mut Core) -> Result<(), Error> {
     writeln!(io::stderr(), "+ querying available packages")?;
     let normal_paths = nixpkgs::query_packages(&args.nixpkgs, None)?;
-    let haskell_paths = nixpkgs::query_packages(&args.nixpkgs, Some("haskellPackages"))?;
+    //let haskell_paths = nixpkgs::query_packages(&args.nixpkgs, Some("haskellPackages"))?;
+    let haskell_paths = std::iter::empty();
     let paths: Vec<StorePath> = normal_paths.chain(haskell_paths).collect::<Result<_, _>>()?;
 
-    let fetcher = Fetcher {
-        client: client,
-        timer: Timer::default(),
-        retry_strategy: FixedInterval::new(Duration::from_millis(500))
-            .jitter()
-            .limit_retries(5),
-        jobs: args.jobs,
-    };
+    let fetcher = Fetcher::new(CACHE_URL.to_string(), lp.handle());
 
-    let (requests, watch) = fetcher.try_fetch_references(paths.clone());
-    let requests = Box::new(requests
-                                .map(|path| fetcher.try_fetch_files(path))
-                                .buffer_unordered(args.jobs));
+    let (requests, watch) = fetch_file_listings(&fetcher, args.jobs, paths.clone());
+    let requests = Box::new(requests);
 
     let cached = if args.path_cache {
         try_load_paths_cache()?
@@ -303,11 +245,7 @@ fn update_index(args: &Args, lp: &mut Core, client: &Client<HttpConnector>) -> R
     Ok(())
 }
 
-fn run<'a>(
-    matches: &ArgMatches<'a>,
-    lp: &mut Core,
-    client: &Client<HttpConnector>,
-) -> Result<(), Error> {
+fn run<'a>(matches: &ArgMatches<'a>, lp: &mut Core) -> Result<(), Error> {
     let args = Args {
         jobs: value_t!(matches.value_of("requests"), usize)?,
         database: PathBuf::from(matches.value_of("database").unwrap()),
@@ -320,12 +258,11 @@ fn run<'a>(
     };
 
 
-    update_index(&args, lp, client)
+    update_index(&args, lp)
 }
 
 fn main() {
     let mut lp = Core::new().unwrap();
-    let client = Client::new(&lp.handle());
 
     let base = xdg::BaseDirectories::with_prefix("nix-index").unwrap();
     let cache_dir = base.get_cache_home();
@@ -364,7 +301,7 @@ fn main() {
                     Note: does not check if the cached data is up to date! Use only for development."))
         .get_matches();
 
-    run(&matches, &mut lp, &client).unwrap_or_else(|e| {
+    run(&matches, &mut lp).unwrap_or_else(|e| {
         if let Error::Args(e) = e {
             e.exit()
         }
