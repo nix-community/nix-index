@@ -21,9 +21,13 @@ use package::{PathOrigin, StorePath};
 /// of `attr` are returned.
 ///
 /// The function returns an Iterator over the packages returned by nix-env.
-pub fn query_packages(nixpkgs: &str, scope: Option<&str>) -> Result<PackagesQuery<ChildStdout>, Error> {
+pub fn query_packages(
+    nixpkgs: &str,
+    scope: Option<&str>,
+) -> Result<PackagesQuery<ChildStdout>, Error> {
     let mut cmd = Command::new("nix-env");
-    cmd.arg("-qaP").arg("--out-path")
+    cmd.arg("-qaP")
+        .arg("--out-path")
         .arg("--xml")
         .arg("--arg")
         .arg("config")
@@ -44,9 +48,9 @@ pub fn query_packages(nixpkgs: &str, scope: Option<&str>) -> Result<PackagesQuer
     let packages = PackagesParser::new(stdout);
 
     Ok(PackagesQuery {
-        parser: Some(packages),
-        child: child,
-    })
+           parser: Some(packages),
+           child: Some(child),
+       })
 }
 
 /// An iterator that parses the output of nix-env and returns parsed store paths.
@@ -54,7 +58,7 @@ pub fn query_packages(nixpkgs: &str, scope: Option<&str>) -> Result<PackagesQuer
 /// Use `query_packages` to create a value of this type.
 pub struct PackagesQuery<R: Read> {
     parser: Option<PackagesParser<R>>,
-    child: Child,
+    child: Option<Child>,
 }
 
 impl<R: Read> PackagesQuery<R> {
@@ -64,17 +68,16 @@ impl<R: Read> PackagesQuery<R> {
     /// If the exit code was non-zero, returns Some(err), else it returns None.
     fn check_error(&mut self) -> Option<Error> {
         let mut run = || {
-            let status = self.child.wait()?;
+            let child = match self.child.take() {
+                Some(c) => c,
+                None => return Ok(()),
+            };
+            let result = child.wait_with_output()?;
 
-            if !status.success() {
-                let mut message = String::new();
-                self.child
-                    .stderr
-                    .take()
-                    .expect("should have stderr pipe")
-                    .read_to_string(&mut message)?;
+            if !result.status.success() {
+                let message = String::from_utf8_lossy(&result.stderr);
 
-                return Err(Error::Command(match status.code() {
+                return Err(Error::Command(match result.status.code() {
                                               Some(c) => {
                                                   format!("nix-env failed with exit code {}:\n{}",
                                                           c,
@@ -392,6 +395,3 @@ impl From<ParserError> for Error {
         Error::Parse(err)
     }
 }
-
-
-
