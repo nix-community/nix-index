@@ -19,7 +19,7 @@ use futures::future::{self, Either};
 use xz2::write::XzDecoder;
 use serde::de::{Deserialize, Deserializer, MapVisitor, Visitor};
 use serde::bytes::ByteBuf;
-use hyper::client::{Client, Response, Connect, HttpConnector};
+use hyper::client::{Client, Response, HttpConnector};
 use hyper::{self, Uri, StatusCode};
 use hyper::header::{ContentEncoding, Encoding, Headers};
 use brotli2::write::BrotliDecoder;
@@ -192,14 +192,12 @@ impl Fetcher {
                     let result = content
                         .fold((url, BrotliDecoder::new(Vec::new())),
                               move |(url, mut decoder), chunk| {
-                            println!("\ndecoding: {}", url);
                             decoder
                                 .write_all(&chunk)
                                 .chain_err(|| ErrorKind::Decode(url.clone()))
                                 .map(move |_| (url, decoder))
                         })
                         .and_then(|(url, mut d)| {
-                            println!("\nfinished decoding: {}", url);
                             d.finish()
                                 .chain_err(|| ErrorKind::Decode(url.clone()))
                                 .map(move |v| (url, v))
