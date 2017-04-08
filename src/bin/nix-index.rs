@@ -1,5 +1,4 @@
 //! Tool for generating a nix-index database.
-
 #[macro_use]
 extern crate clap;
 extern crate bincode;
