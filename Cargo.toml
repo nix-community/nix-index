@@ -27,6 +27,7 @@ separator = "0.3.1"
 serde = "0.9.7"
 serde_derive = "0.9.7"
 serde_json = "0.9.8"
+stderr = "0.7.0"
 tokio-core = "0.1.4"
 tokio-retry = "0.0.5"
 tokio-timer = "0.1.0"
@@ -36,12 +37,12 @@ xml-rs = "0.4.1"
 xz2 = "0.1.1"
 zstd = "0.4.3"
 
+[dependencies.brotli2]
+branch = "fix-8"
+git = "https://github.com/bennofs/brotli2-rs"
+
 [dependencies.hyper]
 git = "https://github.com/hyperium/hyper"
-
-[dependencies.brotli2]
-git = "https://github.com/bennofs/brotli2-rs"
-branch = "fix-8"
 
 [profile]
 

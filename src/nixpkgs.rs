@@ -9,6 +9,7 @@ use xml::reader::{EventReader, XmlEvent};
 use xml::common::{TextPosition, Position};
 use std::process::{Command, Stdio, Child, ChildStdout};
 use std::fmt;
+use std::error;
 
 use package::{PathOrigin, StorePath};
 
@@ -24,7 +25,7 @@ use package::{PathOrigin, StorePath};
 pub fn query_packages(
     nixpkgs: &str,
     scope: Option<&str>,
-) -> Result<PackagesQuery<ChildStdout>, Error> {
+) -> PackagesQuery<ChildStdout> {
     let mut cmd = Command::new("nix-env");
     cmd.arg("-qaP")
         .arg("--out-path")
@@ -42,15 +43,11 @@ pub fn query_packages(
         cmd.arg("-A").arg(scope);
     }
 
-    let mut child = cmd.spawn()?;
-
-    let stdout = child.stdout.take().expect("should have stdout pipe");
-    let packages = PackagesParser::new(stdout);
-
-    Ok(PackagesQuery {
-           parser: Some(packages),
-           child: Some(child),
-       })
+    PackagesQuery {
+        parser: None,
+        child: None,
+        cmd: Some(cmd),
+    }
 }
 
 /// An iterator that parses the output of nix-env and returns parsed store paths.
@@ -59,9 +56,26 @@ pub fn query_packages(
 pub struct PackagesQuery<R: Read> {
     parser: Option<PackagesParser<R>>,
     child: Option<Child>,
+    cmd: Option<Command>,
 }
 
-impl<R: Read> PackagesQuery<R> {
+impl PackagesQuery<ChildStdout> {
+    /// Spawns the nix-env subprocess and initializes the parser.
+    ///
+    /// If the subprocess was already spawned, does nothing.
+    fn ensure_initialized(&mut self) -> Result<(), Error> {
+        if let Some(mut cmd) = self.cmd.take() {
+            let mut child = cmd.spawn()?;
+
+            let stdout = child.stdout.take().expect("should have stdout pipe");
+            let parser = PackagesParser::new(stdout);
+
+            self.child = Some(child);
+            self.parser = Some(parser);
+        }
+        Ok(())
+    }
+
     /// Waits for the subprocess to exit and checks whether it has returned a non-zero exit code
     /// (= failed with an error).
     ///
@@ -97,9 +111,12 @@ impl<R: Read> PackagesQuery<R> {
     }
 }
 
-impl<R: Read> Iterator for PackagesQuery<R> {
+impl Iterator for PackagesQuery<ChildStdout> {
     type Item = Result<StorePath, Error>;
     fn next(&mut self) -> Option<Self::Item> {
+        if let Err(e) = self.ensure_initialized() {
+            return Some(Err(e));
+        }
         self.parser
             .take()
             .and_then(|mut parser| {
@@ -370,6 +387,16 @@ pub enum Error {
 
     /// nix-env failed with an error message
     Command(String),
+}
+
+impl error::Error for Error {
+    fn description(&self) -> &str {
+        match *self {
+            Error::Parse(_) => "nix-env output parse error",
+            Error::Io(_) => "io error",
+            Error::Command(_) => "nix-env error"
+        }
+    }
 }
 
 impl fmt::Display for Error {
