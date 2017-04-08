@@ -106,6 +106,9 @@ pub struct Fetcher {
 
 const RESPONSE_TIMEOUT_MS: u64 = 1000;
 
+/// A boxed future using this module's error type.
+type BoxFuture<'a, I> = Box<Future<Item=I, Error=Error> + 'a>;
+
 impl Fetcher {
     /// Initializes a new instance of the `Fetcher` struct.
     ///
@@ -133,8 +136,7 @@ impl Fetcher {
     ///
     /// This function will automatically retry the request some times to avoid intermittent network
     /// failures.
-    fn fetch<'a>(&'a self, url: String, encoding: Option<SupportedEncoding>)
-                 -> Box<Future<Item = (String, Option<Vec<u8>>), Error = Error> + 'a> {
+    fn fetch(&self, url: String, encoding: Option<SupportedEncoding>) -> BoxFuture<(String, Option<Vec<u8>>)> {
         let strategy = FixedInterval::new(Duration::from_millis(500)).limit_retries(20);
         Box::new(strategy.run(self.timer.clone(), move || {
             self.fetch_noretry(url.clone(), encoding)
@@ -142,8 +144,7 @@ impl Fetcher {
     }
 
     /// The implementation of `fetch`, without the retry logic.
-    fn fetch_noretry<'a>(&'a self, url: String, encoding: Option<SupportedEncoding>) ->
-        Box<Future<Item = (String, Option<Vec<u8>>), Error = Error> + 'a> {
+    fn fetch_noretry(&self, url: String, encoding: Option<SupportedEncoding>) -> BoxFuture<(String, Option<Vec<u8>>)> {
         let uri = Uri::from_str(&url).map_err(|e| Error::from(hyper::Error::from(e)));
         let process_response = move |res: Response| {
             let code = res.status();
@@ -230,8 +231,7 @@ impl Fetcher {
     /// function only requires the hash part of the store path that is passed as argument,
     /// but it will return a full store path as a result. So you can use this function to
     /// resolve hashes to full store paths as well.
-    pub fn fetch_references<'a>(&'a self, mut path: StorePath) ->
-        Box<Future<Item = (StorePath, Vec<StorePath>), Error = Error> + 'a> {
+    pub fn fetch_references(&self, mut path: StorePath) -> BoxFuture<(StorePath, Vec<StorePath>)> {
         let url = format!("{}/{}.narinfo", self.cache_url, path.hash());
     
         let parse_response = move |(url, data)| {
@@ -273,7 +273,7 @@ impl Fetcher {
             Ok((path, result))
         };
     
-        Box::new(self.fetch(url, None).and_then(move |x| parse_response(x)))
+        Box::new(self.fetch(url, None).and_then(parse_response))
     }
     
     /// Fetches the file listing for the given store path.
@@ -387,7 +387,7 @@ struct FileListingResponse {
 struct HydraFileListing(FileTree);
 
 /// We need a manual implementation for Deserialize here because file lisitings can contain non-unicode
-/// bytes so we need to explicitly request that keys be deserialized as ByteBuf and not String.
+/// bytes so we need to explicitly request that keys be deserialized as `ByteBuf` and not String.
 ///
 /// We cannot use the serde-derive machinery because the `tagged` enum variant does not support map keys
 /// that aren't valid unicode (since it relies on the Deserializer to tell it the type, and the JSON Deserializer

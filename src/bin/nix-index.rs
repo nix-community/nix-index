@@ -37,8 +37,8 @@ const CACHE_URL: &'static str = "http://cache.nixos.org";
 enum Error {
     Io(io::Error),
     QueryPackages(nixpkgs::Error),
-    FetchFiles(StorePath, hydra::Error),
-    FetchReferences(StorePath, hydra::Error),
+    FetchFiles(StorePath, Box<hydra::Error>),
+    FetchReferences(StorePath, Box<hydra::Error>),
     Serialize(bincode::Error),
     Args(clap::Error),
 }
@@ -101,8 +101,9 @@ impl fmt::Display for Error {
     }
 }
 
-fn fetch_file_listings<'a>(fetcher: &'a Fetcher, jobs: usize, starting_set: Vec<StorePath>) ->
-    (Box<Stream<Item = (StorePath, Option<FileTree>), Error = Error> + 'a>, WorkSetWatch) {
+type FileListingStream<'a> = Box<Stream<Item = (StorePath, Option<FileTree>), Error = Error> + 'a>;
+
+fn fetch_file_listings(fetcher: &Fetcher, jobs: usize, starting_set: Vec<StorePath>) -> (FileListingStream, WorkSetWatch) {
     let workset = WorkSet::from_iter(starting_set
                                      .into_iter()
                                      .map(|x| (x.hash().into_owned(), x)));
@@ -113,7 +114,7 @@ fn fetch_file_listings<'a>(fetcher: &'a Fetcher, jobs: usize, starting_set: Vec<
         .map(move |(mut handle, path)| {
             fetcher.fetch_references(path.clone()).then(move |e| {
                 match e {
-                    Err(e) => Err(Error::FetchReferences(path, e)),
+                    Err(e) => Err(Error::FetchReferences(path, Box::new(e))),
                     Ok((path, references)) => {
                         for reference in references {
                             let hash = reference.hash().into_owned();
@@ -127,7 +128,7 @@ fn fetch_file_listings<'a>(fetcher: &'a Fetcher, jobs: usize, starting_set: Vec<
                     .fetch_files(&path)
                     .then(move |r| {
                         match r {
-                            Err(e) => Err(Error::FetchFiles(path, e)),
+                            Err(e) => Err(Error::FetchFiles(path, Box::new(e))),
                             Ok(files) => Ok((path, files)),
                         }
                     })

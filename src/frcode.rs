@@ -323,15 +323,12 @@ impl<R: BufRead> Decoder<R> {
         // Allow resizing the buffer, since we haven't decoded a full entry yet
         self.buf.allow_resize = true;
 
-        // Have we found a NUL byte yet?
-        let mut found_nul = false;
-
         // If the the last decoded byte in the buffer is a NUL byte, that means that
         // we are now at the start of the path part of the entry. This means that
         // we need to copy the shared prefix now.
-        if self.pos > 0 && self.buf[self.pos - 1] == b'\0' {
+        let mut found_nul = self.pos > 0 && self.buf[self.pos - 1] == b'0';
+        if found_nul {
             self.copy_shared()?;
-            found_nul = true;
         }
 
         // At this point, we are guaranteed to be in either the metadata part or the non-shared part
