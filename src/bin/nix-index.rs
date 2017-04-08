@@ -103,36 +103,39 @@ impl fmt::Display for Error {
 
 type FileListingStream<'a> = Box<Stream<Item = (StorePath, Option<FileTree>), Error = Error> + 'a>;
 
-fn fetch_file_listings(fetcher: &Fetcher, jobs: usize, starting_set: Vec<StorePath>) -> (FileListingStream, WorkSetWatch) {
+fn fetch_file_listings(
+    fetcher: &Fetcher,
+    jobs: usize,
+    starting_set: Vec<StorePath>,
+) -> (FileListingStream, WorkSetWatch) {
     let workset = WorkSet::from_iter(starting_set
-                                     .into_iter()
-                                     .map(|x| (x.hash().into_owned(), x)));
+                                         .into_iter()
+                                         .map(|x| (x.hash().into_owned(), x)));
     let watch = workset.watch();
-    
+
     let stream = workset
         .then(|r| future::ok(r.void_unwrap()))
         .map(move |(mut handle, path)| {
-            fetcher.fetch_references(path.clone()).then(move |e| {
-                match e {
-                    Err(e) => Err(Error::FetchReferences(path, Box::new(e))),
-                    Ok((path, references)) => {
-                        for reference in references {
-                            let hash = reference.hash().into_owned();
-                            handle.add_work(hash, reference);
-                        }
-                        Ok(path)
+            fetcher
+                .fetch_references(path.clone())
+                .then(move |e| match e {
+                          Err(e) => Err(Error::FetchReferences(path, Box::new(e))),
+                          Ok((path, references)) => {
+                    for reference in references {
+                        let hash = reference.hash().into_owned();
+                        handle.add_work(hash, reference);
                     }
+                    Ok(path)
                 }
-            }).and_then(move |path| {
-                fetcher
-                    .fetch_files(&path)
-                    .then(move |r| {
-                        match r {
-                            Err(e) => Err(Error::FetchFiles(path, Box::new(e))),
-                            Ok(files) => Ok((path, files)),
-                        }
-                    })
-            })
+                      })
+                .and_then(move |path| {
+                    fetcher
+                        .fetch_files(&path)
+                        .then(move |r| match r {
+                                  Err(e) => Err(Error::FetchFiles(path, Box::new(e))),
+                                  Ok(files) => Ok((path, files)),
+                              })
+                })
         })
         .buffer_unordered(jobs);
 
@@ -179,7 +182,8 @@ fn update_index(args: &Args, lp: &mut Core) -> Result<(), Error> {
     let normal_paths = nixpkgs::query_packages(&args.nixpkgs, None)?;
     //let haskell_paths = nixpkgs::query_packages(&args.nixpkgs, Some("haskellPackages"))?;
     let haskell_paths = std::iter::empty();
-    let paths: Vec<StorePath> = normal_paths.chain(haskell_paths).collect::<Result<_, _>>()?;
+    let paths: Vec<StorePath> = normal_paths.chain(haskell_paths)
+        .collect::<Result<_, _>>()?;
 
     let fetcher = Fetcher::new(CACHE_URL.to_string(), lp.handle());
 
