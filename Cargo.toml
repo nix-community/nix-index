@@ -38,7 +38,7 @@ xz2 = "0.1.1"
 zstd = "0.4.3"
 
 [dependencies.brotli2]
-branch = "fix-8"
+rev = "db44e8d1c70e066f7d95d8a7333b51c4fd847870"
 git = "https://github.com/bennofs/brotli2-rs"
 
 [dependencies.hyper]

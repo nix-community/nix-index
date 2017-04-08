@@ -1,3 +1,4 @@
+//! Tool for searching for files in nixpkgs packages
 #[macro_use]
 extern crate clap;
 extern crate grep;
@@ -7,9 +8,13 @@ extern crate xdg;
 extern crate regex;
 extern crate isatty;
 extern crate ansi_term;
+#[macro_use]
+extern crate error_chain;
+#[macro_use]
+extern crate stderr;
 
-use std::io::{self, Write};
 use std::path::PathBuf;
+use std::result;
 use std::process;
 use std::str;
 use separator::Separatable;
@@ -21,46 +26,24 @@ use ansi_term::Colour::Red;
 use nix_index::database;
 use nix_index::files::{self, FileType, FileTreeEntry};
 
-enum Error {
-    Io(io::Error),
-    DatabaseRead(database::Error),
-    Grep(grep::Error),
-    Args(clap::Error),
-}
-
-impl From<io::Error> for Error {
-    fn from(err: io::Error) -> Self {
-        Error::Io(err)
+error_chain! {
+    errors {
+        ReadDatabase(database: PathBuf) {
+            description("database read error")
+            display("reading from the database at '{}' failed", database.to_string_lossy())
+        }
+        Grep(pattern: String) {
+            description("grep builder error")
+            display("constructing the regular expression from the pattern '{}' failed", pattern)
+        }
     }
 }
 
-impl From<clap::Error> for Error {
-    fn from(err: clap::Error) -> Self {
-        Error::Args(err)
-    }
-}
-
-impl From<database::Error> for Error {
-    fn from(err: database::Error) -> Self {
-        Error::DatabaseRead(err)
-    }
-}
-
-impl From<grep::Error> for Error {
-    fn from(err: grep::Error) -> Self {
-        Error::Grep(err)
-    }
-}
-
-impl From<regex::Error> for Error {
-    fn from(err: regex::Error) -> Self {
-        Error::Grep(grep::Error::Regex(err))
-    }
-}
-
-
+/// The struct holding the parsed arguments for searching
 struct Args {
+    /// Path of the nix-index database.
     database: PathBuf,
+    /// The pattern to search for. This is always in regex syntax.
     pattern: String,
     group: bool,
     hash: Option<String>,
@@ -70,16 +53,19 @@ struct Args {
     color: bool,
 }
 
-fn locate(args: &Args) -> Result<(), Error> {
-    let index_file = args.database.join("files.zst");
-    let pattern = GrepBuilder::new(&args.pattern).build()?;
+/// The main function of this module: searches with the given options in the database.
+fn locate(args: &Args) -> Result<()> {
+    // Build the regular expression matcher
+    let pattern = GrepBuilder::new(&args.pattern).build().chain_err(|| ErrorKind::Grep(args.pattern.clone()))?;
     let name_pattern = if let Some(ref pat) = args.name_pattern {
-        Some(Regex::new(pat)?)
+        Some(Regex::new(pat).chain_err(|| ErrorKind::Grep(pat.clone()))?)
     } else {
         None
     };
 
-    let mut db = database::Reader::open(index_file)?;
+    // Open the database
+    let index_file = args.database.join("files.zst");
+    let mut db = database::Reader::open(&index_file).chain_err(|| ErrorKind::ReadDatabase(index_file.clone()))?;
 
     let results = db.find_iter(&pattern)
         .filter(|v| {
@@ -109,7 +95,7 @@ fn locate(args: &Args) -> Result<(), Error> {
         });
 
     for v in results {
-        let (store_path, FileTreeEntry { path, node }) = v?;
+        let (store_path, FileTreeEntry { path, node }) = v.chain_err(|| ErrorKind::ReadDatabase(index_file.clone()))?;
 
         use files::FileNode::*;
         let (typ, size) = match node {
@@ -150,7 +136,10 @@ fn locate(args: &Args) -> Result<(), Error> {
     Ok(())
 }
 
-fn run<'a>(matches: &ArgMatches<'a>) -> Result<(), Error> {
+/// Extract the parsed arguments for clap's arg matches.
+///
+/// Handles parsing the values of more complex arguments.
+fn process_args(matches: &ArgMatches) -> result::Result<Args, clap::Error> {
     let pattern_arg = matches
         .value_of("PATTERN")
         .expect("pattern arg required")
@@ -193,9 +182,38 @@ fn run<'a>(matches: &ArgMatches<'a>) -> Result<(), Error> {
         only_toplevel: matches.is_present("toplevel"),
         color: color.unwrap_or_else(isatty::stdout_isatty)
     };
-
-    locate(&args)
+    Ok(args)
 }
+
+const LONG_USAGE: &'static str = r#"
+How to use
+==========
+
+In the simplest case, just run `nix-index part/of/file/path` to search for all packages that contain
+a file matching that path:
+
+$ nix-index 'bin/firefox'
+...all packages containing a file named 'bin/firefox'
+
+Before using this tool, you first need to generate a nix-index database.
+Use the `nix-index` tool to do that.
+
+Limitations
+===========
+
+* this tool can only find packages which are built by hydra, because only those packages
+  will have file listings that are indexed by nix-index
+
+* we can't know the precise attribute path for every package, so if you see the syntax `(attr)`
+  in the output, that means that `attr` is not the target package but that it
+  depends (perhaps indirectly) on the package that contains the searched file. Example:
+
+  $ nix-locate 'bin/xmonad'
+  (xmonad-with-packages.out)      0 s /nix/store/nl581g5kv3m2xnmmfgb678n91d7ll4vv-ghc-8.0.2-with-packages/bin/xmonad
+
+  This means that we don't know what nixpkgs attribute produces /nix/store/nl581g5kv3m2xnmmfgb678n91d7ll4vv-ghc-8.0.2-with-packages,
+  but we know that `xmonad-with-packages.out` requires it.
+"#;
 
 fn main() {
     let base = xdg::BaseDirectories::with_prefix("nix-index").unwrap();
@@ -256,23 +274,22 @@ fn main() {
              .possible_values(&["always", "never", "auto"])
              .help("Whether to use colors in output. If auto, only use colors if outputting to a terminal.")
         )
+        .after_help(LONG_USAGE)
         .get_matches();
 
-    run(&matches).unwrap_or_else(|e| {
-        use Error::*;
-        match e {
-            Args(e) => e.exit(),
-            Io(e) => writeln!(io::stderr(), "An I/O operation failed: {}", e).unwrap(),
-            DatabaseRead(e) => {
-                writeln!(io::stderr(), "The database could not be read: {}\n", e).unwrap();
-            }
-            Grep(e) => {
-                writeln!(io::stderr(),
-                         "Constructing the regex matcher failed with: {}",
-                         e)
-                        .unwrap();
-            }
+
+    let args = process_args(&matches).unwrap_or_else(|e| e.exit());
+
+    if let Err(e) = locate(&args) {
+        errln!("error: {}", e);
+
+        for e in e.iter().skip(1) {
+            errln!("caused by: {}", e);
+        }
+
+        if let Some(backtrace) = e.backtrace() {
+            errln!("backtrace: {:?}", backtrace);
         }
         process::exit(2);
-    });
+    }
 }

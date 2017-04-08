@@ -249,7 +249,7 @@ fn update_index(args: &Args, lp: &mut Core) -> Result<()> {
 
 /// Extract the arguments from clap's arg matches, applying defaults and parsing them
 /// where necessary.
-fn process_args<'a>(matches: &ArgMatches<'a>) -> result::Result<Args, clap::Error> {
+fn process_args(matches: &ArgMatches) -> result::Result<Args, clap::Error> {
     let args = Args {
         jobs: value_t!(matches.value_of("requests"), usize)?,
         database: PathBuf::from(matches.value_of("database").unwrap()),
