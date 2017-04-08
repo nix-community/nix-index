@@ -117,7 +117,7 @@ impl ResizableBuf {
             return false;
         }
 
-        self.data.resize(new_size, b'\0');
+        self.data.resize(new_size, b'\x00');
         true
     }
 }
@@ -230,7 +230,7 @@ impl<R: BufRead> Decoder<R> {
                     return Ok(false);
                 }
 
-                let (done, len) = match memchr::memchr(b'\0', input) {
+                let (done, len) = match memchr::memchr(b'\x00', input) {
                     Some(i) => (true, i + 1),
                     None => (false, input.len()),
                 };
@@ -326,7 +326,7 @@ impl<R: BufRead> Decoder<R> {
         // If the the last decoded byte in the buffer is a NUL byte, that means that
         // we are now at the start of the path part of the entry. This means that
         // we need to copy the shared prefix now.
-        let mut found_nul = self.pos > 0 && self.buf[self.pos - 1] == b'0';
+        let mut found_nul = self.pos > 0 && self.buf[self.pos - 1] == b'\x00';
         if found_nul {
             self.copy_shared()?;
         }

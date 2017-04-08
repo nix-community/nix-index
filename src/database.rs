@@ -102,11 +102,11 @@ error_chain! {
         }
         EntryParse(entry: Vec<u8>) {
             description("entry parse failure")
-            display("database corrupt, could not parse entry: {}", String::from_utf8_lossy(entry))
+            display("database corrupt, could not parse entry: {:?}", String::from_utf8_lossy(entry))
         }
         StorePathParse(path: Vec<u8>) {
             description("store path parse failure")
-            display("database corrupt, could not parse store path: {}", String::from_utf8_lossy(path))
+            display("database corrupt, could not parse store path: {:?}", String::from_utf8_lossy(path))
         }
     }
 
@@ -163,6 +163,20 @@ impl Reader {
             pattern: pattern,
             package_entry_pattern: GrepBuilder::new("^p\0").build().expect("valid regex"),
         }
+    }
+
+    /// Dumps the contents of the database to stdout, for debugging.
+    #[cfg_attr(feature = "cargo-clippy", allow(print_stdout))]
+    pub fn dump(&mut self) -> Result<()> {
+        loop {
+            let block = self.decoder.decode()?;
+            if block.is_empty() { break }
+            for line in block.split(|c| *c == b'\n') {
+                println!("{:?}", String::from_utf8_lossy(line));
+            }
+            println!("-- block boundary");
+        }
+        Ok(())
     }
 }
 

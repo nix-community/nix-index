@@ -1,4 +1,4 @@
-#![cfg_attr(feature = "cargo-clippy", warn(filter_map, option_map_unwrap_or, option_map_unwrap_or_else, option_unwrap_used, stutter, wrong_pub_self_convention))]
+#![cfg_attr(feature = "cargo-clippy", warn(filter_map, option_map_unwrap_or, option_map_unwrap_or_else, option_unwrap_used, stutter, wrong_pub_self_convention, print_stdout))]
 
 #[macro_use]
 extern crate serde_derive;
