@@ -221,7 +221,7 @@ fn update_index(args: &Args, lp: &mut Core) -> Result<()> {
 
     errst!("+ generating index\r");
     fs::create_dir_all(&args.database).chain_err(|| ErrorKind::CreateDatabaseDir(args.database.clone()))?;
-    let mut db = database::Writer::create(args.database.join("files.zst"), args.compression_level)
+    let mut db = database::Writer::create(args.database.join("files"), args.compression_level)
         .chain_err(|| ErrorKind::CreateDatabase(args.database.clone()))?;
 
     let mut results: Vec<(StorePath, FileTree)> = Vec::new();
