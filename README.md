@@ -26,4 +26,15 @@ $ nix-env -if.
 First, you need to generate an index by running `nix-index`. Then, you can use `nix-locate pattern`. For more information, see `nix-locate --help` and `nix-index --help`.
 
 ## Contributing
-If you find any missing features that you would like to implement, I'm very happy about any PRs! You can also create an issue first if the feature is more complex so we can discuss possible implementations. 
+If you find any missing features that you would like to implement, I'm very happy about any PRs! You can also create an issue first if the feature is more complex so we can discuss possible implementations.
+
+Here is a quick description of all relevant files:
+
+* `bin/{nix-index, nix-locate}.rs`: Implementation of the nix-index / nix-locate command line tools
+* `src/database.rs`: High-level functions for working with the database format
+* `src/files.rs`: The data types for working with file listings
+* `src/frcode.rs`: Low-level implementation of an encoder to efficiently store many file paths (see comments in the file for more details). Used by `database.rs`.
+* `src/hydra.rs`: Deals with everything that has to do with downloading from the binary cache (fetching file listings and references)
+* `src/nixpkgs.rs`: Implements the gathering of the packages (store paths and attributes) using `nix-env`
+* `src/package.rs`: High-level data types for representing store paths (sometimes also refered to as a package)
+* `src/workset.rs`: A queue used by `nix-index` to implement the recursive fetching (fetching references of everything)
