@@ -122,6 +122,12 @@ fn locate(args: &Args) -> Result<()> {
         if args.color {
             let mut prev = 0;
             for mat in pattern.regex().find_iter(path.as_bytes()) {
+                // if the match is empty, we need to make sure we don't use string
+                // indexing because the match may be "inside" a single multibyte character
+                // in that case
+                if mat.start() == mat.end() {
+                    continue
+                }
                 print!("{}{}",
                        &path[prev..mat.start()],
                        Red.paint(&path[mat.start()..mat.end()]));
