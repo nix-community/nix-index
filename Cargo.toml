@@ -10,6 +10,10 @@ name = "nix-index"
 [[bin]]
 name = "nix-locate"
 
+[[example]]
+# this is an example so it is not installed
+name = "nix-index-debug"
+
 [dependencies]
 ansi_term = "0.9.0"
 bincode = "1.0.0-alpha2"
@@ -34,17 +38,16 @@ tokio-timer = "0.1.0"
 void = "1.0.2"
 xdg = "2.0.0"
 xml-rs = "0.4.1"
-xz2 = "0.1.1"
 zstd = "0.4.3"
 
+# these two libraries (brotli2/xz2) have a bug that results in infinite loops on incomplete input
+# use a fixed version until the fix is merged upstream
 [dependencies.brotli2]
-rev = "db44e8d1c70e066f7d95d8a7333b51c4fd847870"
 git = "https://github.com/bennofs/brotli2-rs"
+rev = "db44e8d1c70e066f7d95d8a7333b51c4fd847870"
+[dependencies.xz2]
+git = "https://github.com/bennofs/xz2-rs"
+rev = "8f7c8f27603fa72bc54a0e2041c99a998b9f6613"
 
 [dependencies.hyper]
 git = "https://github.com/hyperium/hyper"
-
-[profile]
-
-[profile.release]
-debug = true

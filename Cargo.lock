@@ -27,7 +27,7 @@ dependencies = [
  "void 1.0.2 (registry+https://github.com/rust-lang/crates.io-index)",
  "xdg 2.1.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "xml-rs 0.4.1 (registry+https://github.com/rust-lang/crates.io-index)",
- "xz2 0.1.1 (registry+https://github.com/rust-lang/crates.io-index)",
+ "xz2 0.1.0 (git+https://github.com/bennofs/xz2-rs?rev=8f7c8f27603fa72bc54a0e2041c99a998b9f6613)",
  "zstd 0.4.6 (registry+https://github.com/rust-lang/crates.io-index)",
 ]
 
@@ -320,8 +320,8 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 
 [[package]]
 name = "lzma-sys"
-version = "0.1.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
+version = "0.1.0"
+source = "git+https://github.com/bennofs/xz2-rs?rev=8f7c8f27603fa72bc54a0e2041c99a998b9f6613#8f7c8f27603fa72bc54a0e2041c99a998b9f6613"
 dependencies = [
  "filetime 0.1.10 (registry+https://github.com/rust-lang/crates.io-index)",
  "gcc 0.3.45 (registry+https://github.com/rust-lang/crates.io-index)",
@@ -763,10 +763,10 @@ dependencies = [
 
 [[package]]
 name = "xz2"
-version = "0.1.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
+version = "0.1.0"
+source = "git+https://github.com/bennofs/xz2-rs?rev=8f7c8f27603fa72bc54a0e2041c99a998b9f6613#8f7c8f27603fa72bc54a0e2041c99a998b9f6613"
 dependencies = [
- "lzma-sys 0.1.1 (registry+https://github.com/rust-lang/crates.io-index)",
+ "lzma-sys 0.1.0 (git+https://github.com/bennofs/xz2-rs?rev=8f7c8f27603fa72bc54a0e2041c99a998b9f6613)",
 ]
 
 [[package]]
@@ -825,7 +825,7 @@ dependencies = [
 "checksum lazycell 0.4.0 (registry+https://github.com/rust-lang/crates.io-index)" = "ce12306c4739d86ee97c23139f3a34ddf0387bbf181bc7929d287025a8c3ef6b"
 "checksum libc 0.2.21 (registry+https://github.com/rust-lang/crates.io-index)" = "88ee81885f9f04bff991e306fea7c1c60a5f0f9e409e99f6b40e3311a3363135"
 "checksum log 0.3.7 (registry+https://github.com/rust-lang/crates.io-index)" = "5141eca02775a762cc6cd564d8d2c50f67c0ea3a372cbf1c51592b3e029e10ad"
-"checksum lzma-sys 0.1.1 (registry+https://github.com/rust-lang/crates.io-index)" = "506a25e3491881f47407458f95429d153437d3a5bc4685c747de69e1ec7e897d"
+"checksum lzma-sys 0.1.0 (git+https://github.com/bennofs/xz2-rs?rev=8f7c8f27603fa72bc54a0e2041c99a998b9f6613)" = "<none>"
 "checksum matches 0.1.4 (registry+https://github.com/rust-lang/crates.io-index)" = "efd7622e3022e1a6eaa602c4cea8912254e5582c9c692e9167714182244801b1"
 "checksum memchr 1.0.1 (registry+https://github.com/rust-lang/crates.io-index)" = "1dbccc0e46f1ea47b9f17e6d67c5a96bd27030519c519c9c91327e31275a47b4"
 "checksum mime 0.2.3 (registry+https://github.com/rust-lang/crates.io-index)" = "5514f038123342d01ee5f95129e4ef1e0470c93bc29edf058a46f9ee3ba6737e"
@@ -883,6 +883,6 @@ dependencies = [
 "checksum ws2_32-sys 0.2.1 (registry+https://github.com/rust-lang/crates.io-index)" = "d59cefebd0c892fa2dd6de581e937301d8552cb44489cdff035c6187cb63fa5e"
 "checksum xdg 2.1.0 (registry+https://github.com/rust-lang/crates.io-index)" = "a66b7c2281ebde13cf4391d70d4c7e5946c3c25e72a7b859ca8f677dcd0b0c61"
 "checksum xml-rs 0.4.1 (registry+https://github.com/rust-lang/crates.io-index)" = "b46ee689ba7a669c08a1170c2348d2516c62dc461135c9e86b2f1f476e07be4a"
-"checksum xz2 0.1.1 (registry+https://github.com/rust-lang/crates.io-index)" = "ac9acceb2beb0a0b6a9fca78c12854ae0455e8f65858da20bd3678bda788feac"
+"checksum xz2 0.1.0 (git+https://github.com/bennofs/xz2-rs?rev=8f7c8f27603fa72bc54a0e2041c99a998b9f6613)" = "<none>"
 "checksum zstd 0.4.6 (registry+https://github.com/rust-lang/crates.io-index)" = "328b045a0ed670b4e7aaa695dfb450c2e5aae8ca3b4d47d2fe60e961511b0c3f"
 "checksum zstd-sys 1.1.5-a (registry+https://github.com/rust-lang/crates.io-index)" = "4a8f78f3ab67fe21656286ed3f5167ddd37fae86953fb118b4d491393f881474"
