@@ -1,5 +1,5 @@
 let
-  defaultNixpkgs = builtins.fetchTarball "github.com/NixOS/nixpkgs/archive/8889d405c7aa22ae7d1e571d3f3c30b14e2faafd.tar.gz" ;
+  defaultNixpkgs = builtins.fetchTarball "github.com/NixOS/nixpkgs/archive/285097af2781cde7eaf819dba39f6d2bfad51692.tar.gz" ;
 in
 { nixpkgs ? defaultNixpkgs }:
 
@@ -10,7 +10,7 @@ buildRustPackage rec {
   version = "0.1.0";
 
   src = builtins.filterSource (name: type: !lib.hasPrefix "target" (baseNameOf name) && !lib.hasPrefix "result" (baseNameOf name)) ./.;
-  depsSha256 = "1hqlshh928jmpj1lm07h63f47p2amfg6qw5plfvwk0xbas6hg9fw";
+  depsSha256 = "04hw4wq24xi6qm92ma1dksm4csknqygxkpini5ibs9sfhzs90y10";
   buildInputs = [pkgconfig openssl curl];
 
   meta = with stdenv.lib; {
