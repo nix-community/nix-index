@@ -258,7 +258,7 @@ fn process_args(matches: &ArgMatches) -> result::Result<Args, clap::Error> {
             .expect("nixpkgs arg required")
             .to_string(),
         compression_level: value_t!(matches.value_of("level"), i32)?,
-        path_cache: matches.is_present("pathcache"),
+        path_cache: matches.is_present("path-cache"),
     };
 
     Ok(args)
@@ -296,7 +296,7 @@ fn main() {
              .long("compression")
              .help("Zstandard compression level")
              .default_value("22"))
-        .arg(Arg::with_name("pathcache")
+        .arg(Arg::with_name("path-cache")
              .long("path-cache")
              .hidden(true)
              .help("Store and load results of fetch phase in a file called paths.cache.\n\
