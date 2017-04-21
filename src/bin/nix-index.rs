@@ -186,12 +186,13 @@ fn update_index(args: &Args, lp: &mut Core) -> Result<()> {
             }
         } 
 
-        // haskellPackages is the only scope that is not included in nix-env by default
-        // but is still built by hydra.
+        // haskellPackages and xlibs are the only scopes that are not included in nix-env by default
+        // but are still built by hydra.
         let normal_paths = nixpkgs::query_packages(&args.nixpkgs, None);
+        let xlibs_paths = nixpkgs::query_packages(&args.nixpkgs, Some("xlibs"));
         let haskell_paths = nixpkgs::query_packages(&args.nixpkgs, Some("haskellPackages"));
 
-        let paths: Vec<StorePath> = normal_paths.chain(haskell_paths)
+        let paths: Vec<StorePath> = normal_paths.chain(haskell_paths).chain(xlibs_paths)
             .map(|x| x.chain_err(|| ErrorKind::QueryPackages))
             .collect::<Result<_>>()?;
 
