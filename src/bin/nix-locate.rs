@@ -195,10 +195,10 @@ const LONG_USAGE: &'static str = r#"
 How to use
 ==========
 
-In the simplest case, just run `nix-index part/of/file/path` to search for all packages that contain
+In the simplest case, just run `nix-locate part/of/file/path` to search for all packages that contain
 a file matching that path:
 
-$ nix-index 'bin/firefox'
+$ nix-locate 'bin/firefox'
 ...all packages containing a file named 'bin/firefox'
 
 Before using this tool, you first need to generate a nix-index database.
