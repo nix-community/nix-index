@@ -10,7 +10,7 @@ buildRustPackage rec {
   name = "nix-index-${version}";
   version = "0.1.0";
 
-  src = builtins.filterSource (name: type: !lib.hasPrefix "target" (baseNameOf name) && !lib.hasPrefix "result" (baseNameOf name)) ./.;
+  src = builtins.filterSource (name: type: !lib.hasPrefix "target" (baseNameOf name) && !lib.hasPrefix "result" (baseNameOf name) && name != ".git") ./.;
   depsSha256 = "15z3saizbyyjdwfrfz94sznxn2pzm7zl8vgp9ps5grva5k9izaxg";
   buildInputs = [pkgconfig openssl curl];
 
