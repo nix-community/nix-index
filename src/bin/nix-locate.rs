@@ -47,7 +47,7 @@ struct Args {
     pattern: String,
     group: bool,
     hash: Option<String>,
-    name_pattern: Option<String>,
+    package_pattern: Option<String>,
     file_type: Vec<FileType>,
     only_toplevel: bool,
     color: bool,
@@ -57,7 +57,7 @@ struct Args {
 fn locate(args: &Args) -> Result<()> {
     // Build the regular expression matcher
     let pattern = GrepBuilder::new(&args.pattern).build().chain_err(|| ErrorKind::Grep(args.pattern.clone()))?;
-    let name_pattern = if let Some(ref pat) = args.name_pattern {
+    let package_pattern = if let Some(ref pat) = args.package_pattern {
         Some(Regex::new(pat).chain_err(|| ErrorKind::Grep(pat.clone()))?)
     } else {
         None
@@ -84,7 +84,7 @@ fn locate(args: &Args) -> Result<()> {
                         args.hash
                             .as_ref()
                             .map_or(true, |h| h == &store_path.hash()),
-                        name_pattern
+                        package_pattern
                             .as_ref()
                             .map_or(true, |r| r.is_match(&store_path.name())),
                         args.file_type.iter().any(|t| &node.get_type() == t),
@@ -150,9 +150,9 @@ fn process_args(matches: &ArgMatches) -> result::Result<Args, clap::Error> {
         .value_of("PATTERN")
         .expect("pattern arg required")
         .to_string();
-    let name_arg = matches.value_of("name");
-    let make_pattern = |s: &str| if matches.is_present("regex") {
-        s.to_string()
+    let package_arg = matches.value_of("package");
+    let make_pattern = |s: &str, whole: bool| if matches.is_present("regex") {
+        s.to_string() + if whole { "$" } else {  "" }
     } else {
         regex::escape(s)
     };
@@ -173,8 +173,8 @@ fn process_args(matches: &ArgMatches) -> result::Result<Args, clap::Error> {
     let args = Args {
         database: PathBuf::from(matches.value_of("database").expect("database has default value by clap")),
         group: !matches.is_present("no-group"),
-        pattern: make_pattern(&pattern_arg),
-        name_pattern: name_arg.map(make_pattern),
+        pattern: make_pattern(&pattern_arg, matches.is_present("whole")),
+        package_pattern: package_arg.map(|p| make_pattern(p, false)),
         hash: matches.value_of("hash").map(str::to_string),
         file_type: matches.values_of("type").map_or(files::ALL_FILE_TYPES.to_vec(), |types| {
             types.map(|t| match t {
@@ -243,7 +243,7 @@ fn main() {
              .short("r")
              .long("regex")
              .help("Treat PATTERN as regex instead of literal text. Also applies to --name option."))
-        .arg(Arg::with_name("name")
+        .arg(Arg::with_name("package")
              .short("p")
              .long("package")
              .value_name("PATTERN")
@@ -278,8 +278,14 @@ fn main() {
              .multiple(false)
              .value_name("COLOR")
              .possible_values(&["always", "never", "auto"])
-             .help("Whether to use colors in output. If auto, only use colors if outputting to a terminal.")
-        )
+             .help("Whether to use colors in output. If auto, only use colors if outputting to a terminal."))
+        .arg(Arg::with_name("whole")
+             .short("w")
+             .long("whole-name")
+             .help("Only print matches for files or directories whose basename matches PATTERN exactly.\n\
+                    This means that the pattern `bin/foo` will only match a file called `bin/foo` or `xx/bin/foo`\n\
+                    but not `bin/foobar`."
+             ))
         .after_help(LONG_USAGE)
         .get_matches();
 
