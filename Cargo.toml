@@ -10,6 +10,9 @@ name = "nix-index"
 [[bin]]
 name = "nix-locate"
 
+[[bin]]
+name = "command-not-found"
+
 [dependencies]
 ansi_term = "0.9.0"
 bincode = "1.0.0-alpha2"
