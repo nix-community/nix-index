@@ -14,6 +14,13 @@ buildRustPackage rec {
   depsSha256 = "15z3saizbyyjdwfrfz94sznxn2pzm7zl8vgp9ps5grva5k9izaxg";
   buildInputs = [pkgconfig openssl curl];
 
+  postInstall = ''
+    mkdir -p $out/etc/profile.d
+    cp ${./command-not-found.sh} $out/etc/profile.d/command-not-found.sh
+    substituteInPlace $out/etc/profile.d/command-not-found.sh \
+      --replace "@out@" "$out"
+  '';
+
   meta = with stdenv.lib; {
     description = "A files database for nixpkgs";
     homepage = https://github.com/bennofs/nix-index;
