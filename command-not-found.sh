@@ -6,7 +6,7 @@
 command_not_found_handle () {
     toplevel=nixos # TODO: detect this somehow
     cmd=$1 # TODO: differentiate between paths and commands
-    attrs=$(@out@/bin/nix-locate -1 --no-group --type x --top-level --regex "/bin/$cmd$")
+    attrs=$(@out@/bin/nix-locate -1 --no-group --type x --top-level --whole "/bin/$cmd")
     len=$(echo -n "$attrs" | grep -c "^")
 
     case $len in
