@@ -21,7 +21,9 @@ command_not_found_handle () {
         *)
             >&2 echo "The program '$cmd' is currently not installed. It is provided by"
             >&2 echo "several packages. You can install it by typing one of the following:"
-            for attr in $(echo $attrs); do # HACK: fix me
+
+            # need $(echo ...) to ensure attrs is split up by line correctly
+            for attr in $(echo $attrs); do
                 >&2 echo "  nix-env -iA $toplevel.$attr"
             done
             ;;
