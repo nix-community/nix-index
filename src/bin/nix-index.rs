@@ -186,13 +186,31 @@ fn update_index(args: &Args, lp: &mut Core) -> Result<()> {
             }
         } 
 
-        // haskellPackages and xlibs are the only scopes that are not included in nix-env by default
-        // but are still built by hydra.
+        // These are the paths that show up in `nix-env -qa`.
         let normal_paths = nixpkgs::query_packages(&args.nixpkgs, None);
-        let xlibs_paths = nixpkgs::query_packages(&args.nixpkgs, Some("xlibs"));
-        let haskell_paths = nixpkgs::query_packages(&args.nixpkgs, Some("haskellPackages"));
 
-        let paths: Vec<StorePath> = normal_paths.chain(haskell_paths).chain(xlibs_paths)
+        // We also add some additional sets that only show up in `nix-env -qa -A someSet`.
+        //
+        // Some of these sets are not build directly by hydra. We still include them here
+        // since parts of these sets may be build as dependencies of other packages
+        // that are build by hydra. This way, our attribute path information is more
+        // accurate.
+        //
+        // We only need sets that are not marked "recurseIntoAttrs" here, since if they are,
+        // they are already part of normal_paths.
+        let extra_scopes = [
+            "xlibs",
+            "haskellPackages",
+            "rPackages",
+            "nodePackages",
+            "coqPackages"
+        ];
+
+        let all_paths = normal_paths.chain(extra_scopes.into_iter().flat_map(|scope| {
+            nixpkgs::query_packages(&args.nixpkgs, Some(scope))
+        }));
+
+        let paths: Vec<StorePath> = all_paths
             .map(|x| x.chain_err(|| ErrorKind::QueryPackages))
             .collect::<Result<_>>()?;
 
