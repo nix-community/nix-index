@@ -305,6 +305,7 @@ fn main() {
             ))
         .arg(Arg::with_name("minimal")
              .short("1")
+             .long("minimal")
              .help("Only print attribute names of found files or directories.\n\
                     Other details such as size or store path are omitted.\n\
                     This is useful for scripts that use the output of nix-locate."

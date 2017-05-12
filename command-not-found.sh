@@ -6,7 +6,7 @@
 command_not_found_handle () {
     toplevel=nixos # TODO: detect this somehow
     cmd=$1 # TODO: differentiate between paths and commands
-    attrs=$(@out@/bin/nix-locate -1 --no-group --type x --top-level --whole "/bin/$cmd")
+    attrs=$(@out@/bin/nix-locate --minimal --no-group --type x --top-level --whole-name --at-root "/bin/$cmd")
     len=$(echo -n "$attrs" | grep -c "^")
 
     case $len in
@@ -22,10 +22,9 @@ command_not_found_handle () {
             >&2 echo "The program '$cmd' is currently not installed. It is provided by"
             >&2 echo "several packages. You can install it by typing one of the following:"
 
-            # need $(echo ...) to ensure attrs is split up by line correctly
-            for attr in $(echo $attrs); do
+	    echo -n "$attrs" | while read attr; do
                 >&2 echo "  nix-env -iA $toplevel.$attr"
-            done
+	    done
             ;;
     esac
 
