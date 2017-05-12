@@ -150,10 +150,15 @@ fn process_args(matches: &ArgMatches) -> result::Result<Args, clap::Error> {
         .expect("pattern arg required")
         .to_string();
     let package_arg = matches.value_of("package");
-    let make_pattern = |s: &str, whole: bool| if matches.is_present("regex") {
-        s.to_string() + if whole { "$" } else {  "" }
-    } else {
-        regex::escape(s)
+    let start_anchor = if matches.is_present("at-root") { "^" } else { "" };
+    let end_anchor = if matches.is_present("whole") { "$" } else { "" };
+    let make_pattern = |s: &str, wrap: bool| {
+        let regex = if matches.is_present("regex") { s.to_string() } else { regex::escape(s) };
+        if wrap {
+            format!("{}{}{}", start_anchor, regex, end_anchor)
+        } else {
+            regex
+        }
     };
     let color = matches
         .value_of("color")
@@ -172,7 +177,7 @@ fn process_args(matches: &ArgMatches) -> result::Result<Args, clap::Error> {
     let args = Args {
         database: PathBuf::from(matches.value_of("database").expect("database has default value by clap")),
         group: !matches.is_present("no-group"),
-        pattern: make_pattern(&pattern_arg, matches.is_present("whole")),
+        pattern: make_pattern(&pattern_arg, true),
         package_pattern: package_arg.map(|p| make_pattern(p, false)),
         hash: matches.value_of("hash").map(str::to_string),
         file_type: matches.values_of("type").map_or(files::ALL_FILE_TYPES.to_vec(), |types| {
@@ -285,6 +290,12 @@ fn main() {
                     This means that the pattern `bin/foo` will only match a file called `bin/foo` or `xx/bin/foo`\n\
                     but not `bin/foobar`."
              ))
+        .arg(Arg::with_name("at-root")
+            .long("at-root")
+            .help("Treat PATTERN as an absolute file path, so it only matches starting from the root of a package.\n\
+                   This means that the pattern `/bin/foo` only matches a file called `/bin/foo` or `/bin/foobar`\n\
+                   but not `/libexec/bin/foo`."
+            ))
         .after_help(LONG_USAGE)
         .get_matches();
 
