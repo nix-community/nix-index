@@ -6,7 +6,9 @@ use std::io::{self, Read, Write, BufWriter, BufReader, Seek, SeekFrom};
 use std::fs::File;
 use std::path::Path;
 use zstd;
-use grep::{Grep, Match, GrepBuilder};
+use grep::{self, Grep, Match, GrepBuilder};
+use regex_syntax::{Expr};
+use regex::bytes::{Regex};
 use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
 use serde_json;
 
@@ -112,6 +114,7 @@ error_chain! {
 
     foreign_links {
         Io(io::Error);
+        Grep(grep::Error);
     }
 }
 
@@ -155,14 +158,33 @@ impl Reader {
     ///
     /// This returns an `Iterator` over the matches found. There is no guarantee about the order
     /// the matches are returned in.
-    pub fn find_iter<'a, 'b>(&'a mut self, pattern: &'b Grep) -> ReaderIter<'a, 'b> {
-        ReaderIter {
+    pub fn find_iter<'a, 'b>(&'a mut self, exact_regex: &'b Regex) -> Result<ReaderIter<'a, 'b>> {
+        let mut expr = Expr::parse(exact_regex.as_str()).expect("regex cannot be invalid");
+        // replace the ^ anchor by a NUL byte, since each entry is of the form `METADATA\0PATH`
+        // (so the NUL byte marks the start of the path).
+        {
+            let mut stack = vec![&mut expr];
+            while let Some(e) = stack.pop() {
+                match *e {
+                    Expr::StartText => *e = Expr::LiteralBytes { bytes: b"\0".to_vec(), casei: false },
+                    Expr::Group { ref mut e, .. } => stack.push(e),
+                    Expr::Repeat { ref mut e, .. } => stack.push(e),
+                    Expr::Concat(ref mut exprs) | Expr::Alternate(ref mut exprs) => {
+                        stack.extend(exprs)
+                    }
+                    _ => {}
+                }
+            };
+        }
+        let pattern = GrepBuilder::new(&format!("{}", expr)).build()?;
+        Ok(ReaderIter {
             reader: self,
             found: Vec::new(),
             found_without_package: Vec::new(),
             pattern: pattern,
+            exact_pattern: exact_regex,
             package_entry_pattern: GrepBuilder::new("^p\0").build().expect("valid regex"),
-        }
+        })
     }
 
     /// Dumps the contents of the database to stdout, for debugging.
@@ -193,7 +215,16 @@ pub struct ReaderIter<'a, 'b> {
     /// we read the next block of input.
     found_without_package: Vec<FileTreeEntry>,
     /// The pattern for which to search package paths.
-    pattern: &'b Grep,
+    ///
+    /// This pattern should work on the raw bytes of file entries. In particular, the file path is not the
+    /// first data in a file entry, so the regex `^` anchor will not work correctly.
+    ///
+    /// It pattern here may produce false positives (for example, if it matches inside the metadata of a file
+    /// entry). This is not a problem, as matches are later checked against `exact_pattern`.
+    pattern: Grep,
+    /// The raw pattern, as supplied to `find_iter`. This is used to verify matches, since `pattern` itself
+    /// may produce false positives.
+    exact_pattern: &'b Regex,
     /// Pattern that matches only package entries.
     package_entry_pattern: Grep,
 }
@@ -201,6 +232,7 @@ pub struct ReaderIter<'a, 'b> {
 impl<'a, 'b> ReaderIter<'a, 'b> {
     /// Reads input until `self.found` contains at least one entry or the end of the input has been reached.
     fn fill_buf(&mut self) -> Result<()> {
+        // the input is processed in blocks until we've found at least a single entry
         while self.found.is_empty() {
             let &mut ReaderIter {
                          ref mut reader,
@@ -209,10 +241,18 @@ impl<'a, 'b> ReaderIter<'a, 'b> {
                      } = self;
             let block = reader.decoder.decode()?;
 
+            // if the block is empty, the end of input has been reached
             if block.is_empty() {
                 return Ok(());
             }
 
+            // when we find a match, we need to know the package that this match belongs to.
+            // the `find_package` function will skip forward until a package entry is found
+            // (the package entry comes after all file entries for a package).
+            //
+            // to be more efficient if there are many matches, we cache the current package here.
+            // this package is valid for all positions up to the second element of the tuple
+            // (after that, a new package begins).
             let mut cached_package: Option<(StorePath, usize)> = None;
             let mut no_more_package = false;
             let mut find_package = |item_end| -> Result<_> {
@@ -234,6 +274,8 @@ impl<'a, 'b> ReaderIter<'a, 'b> {
                 Ok(Some(pkg))
             };
 
+            // if there are any entries without a package left over from the previous iteration, see
+            // if this block contains the package entry.
             if !self.found_without_package.is_empty() {
                 if let Some(pkg) = find_package(0)? {
                     for entry in self.found_without_package.split_off(0) {
@@ -242,14 +284,21 @@ impl<'a, 'b> ReaderIter<'a, 'b> {
                 }
             }
 
+            // process all matches in this block
             for mat in self.pattern.iter(block) {
                 let entry = &block[mat.start()..mat.end() - 1];
                 if self.package_entry_pattern.regex().is_match(entry) {
                     continue;
                 }
+
                 let entry = FileTreeEntry::decode(entry).ok_or_else(|| {
                     Error::from(ErrorKind::EntryParse(entry.to_vec()))
                 })?;
+
+                // check for false positives
+                if !self.exact_pattern.is_match(&entry.path) {
+                    continue
+                }
 
                 match find_package(mat.end())? {
                     None => self.found_without_package.push(entry),

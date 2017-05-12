@@ -19,8 +19,7 @@ use std::process;
 use std::str;
 use separator::Separatable;
 use clap::{Arg, App, ArgMatches};
-use grep::GrepBuilder;
-use regex::Regex;
+use regex::bytes::Regex;
 use ansi_term::Colour::Red;
 
 use nix_index::database;
@@ -56,7 +55,7 @@ struct Args {
 /// The main function of this module: searches with the given options in the database.
 fn locate(args: &Args) -> Result<()> {
     // Build the regular expression matcher
-    let pattern = GrepBuilder::new(&args.pattern).build().chain_err(|| ErrorKind::Grep(args.pattern.clone()))?;
+    let pattern = Regex::new(&args.pattern).chain_err(|| ErrorKind::Grep(args.pattern.clone()))?;
     let package_pattern = if let Some(ref pat) = args.package_pattern {
         Some(Regex::new(pat).chain_err(|| ErrorKind::Grep(pat.clone()))?)
     } else {
@@ -67,13 +66,13 @@ fn locate(args: &Args) -> Result<()> {
     let index_file = args.database.join("files");
     let mut db = database::Reader::open(&index_file).chain_err(|| ErrorKind::ReadDatabase(index_file.clone()))?;
 
-    let results = db.find_iter(&pattern)
+    let results = db.find_iter(&pattern).chain_err(|| ErrorKind::Grep(args.pattern.clone()))?
         .filter(|v| {
             v.as_ref()
                 .ok()
                 .map_or(true, |v| {
                     let &(ref store_path, FileTreeEntry { ref path, ref node }) = v;
-                    let m = match pattern.regex().find_iter(path).last() {
+                    let m = match pattern.find_iter(path).last() {
                         Some(m) => m,
                         None => return false,
                     };
@@ -86,7 +85,7 @@ fn locate(args: &Args) -> Result<()> {
                             .map_or(true, |h| h == &store_path.hash()),
                         package_pattern
                             .as_ref()
-                            .map_or(true, |r| r.is_match(&store_path.name())),
+                            .map_or(true, |r| r.is_match(store_path.name().as_bytes())),
                         args.file_type.iter().any(|t| &node.get_type() == t),
                     ];
 
@@ -121,7 +120,7 @@ fn locate(args: &Args) -> Result<()> {
 
         if args.color {
             let mut prev = 0;
-            for mat in pattern.regex().find_iter(path.as_bytes()) {
+            for mat in pattern.find_iter(path.as_bytes()) {
                 // if the match is empty, we need to make sure we don't use string
                 // indexing because the match may be "inside" a single multibyte character
                 // in that case
