@@ -19,12 +19,12 @@ use futures::future::{self, Either};
 use xz2::write::XzDecoder;
 use serde::de::{Deserialize, Deserializer, MapVisitor, Visitor};
 use serde::bytes::ByteBuf;
-use hyper::client::{Client, Response, HttpConnector};
-use hyper::{self, Uri, StatusCode};
-use hyper::header::{ContentEncoding, Encoding, Headers};
+use hyper::client::{Client, Response, HttpConnector, Request};
+use hyper::{self, Uri, StatusCode, Method};
+use hyper::header::{AcceptEncoding, ContentEncoding, Encoding, Headers, qitem};
 use brotli2::write::BrotliDecoder;
 use tokio_timer::{self, Timer, TimeoutError, TimerError};
-use tokio_retry::strategies::FixedInterval;
+use tokio_retry::strategies::ExponentialBackoff;
 use tokio_retry::{RetryError, RetryStrategy};
 use tokio_core::reactor::Handle;
 
@@ -134,14 +134,14 @@ impl Fetcher {
     /// other error, the future resolves to an error. If the request was successful, it returns
     /// `(url, Some(response_content))`.
     ///
-    /// This function will automatically retry the request some times to avoid intermittent network
+    /// This function will automatically retry the request a few times to mitigate intermittent network
     /// failures.
     fn fetch(
         &self,
         url: String,
         encoding: Option<SupportedEncoding>,
     ) -> BoxFuture<(String, Option<Vec<u8>>)> {
-        let strategy = FixedInterval::new(Duration::from_millis(500)).limit_retries(20);
+        let strategy = ExponentialBackoff::from_millis(50).limit_delay(Duration::from_millis(500)).limit_retries(20);
         Box::new(strategy
                      .run(self.timer.clone(),
                           move || self.fetch_noretry(url.clone(), encoding))
@@ -233,8 +233,20 @@ impl Fetcher {
             Either::B(decoded.map(|(url, v)| (url, Some(v))))
         };
 
+        let make_request = move |u| {
+            let mut request = Request::new(Method::Get, u);
+            request.headers_mut().set(
+                AcceptEncoding(vec![
+                    qitem(Encoding::Brotli),
+                    qitem(Encoding::Gzip),
+                    qitem(Encoding::Deflate),
+                ])
+            );
+            self.client.request(request).from_err()
+        };
+
         Box::new(future::result(uri)
-                     .and_then(move |u| self.client.get(u).from_err())
+                     .and_then(make_request)
                      .and_then(process_response))
     }
 
