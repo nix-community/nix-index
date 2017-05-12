@@ -50,6 +50,7 @@ struct Args {
     file_type: Vec<FileType>,
     only_toplevel: bool,
     color: bool,
+    minimal: bool,
 }
 
 /// The main function of this module: searches with the given options in the database.
@@ -106,35 +107,40 @@ fn locate(args: &Args) -> Result<()> {
         let mut attr = format!("{}.{}",
                                store_path.origin().attr,
                                store_path.origin().output);
+
         if !store_path.origin().toplevel {
             attr = format!("({})", attr);
         }
 
-        print!("{:<40} {:>14} {:>1} {}",
-               attr,
-               size.separated_string(),
-               typ,
-               store_path.as_str());
-
-        let path = String::from_utf8_lossy(&path);
-
-        if args.color {
-            let mut prev = 0;
-            for mat in pattern.find_iter(path.as_bytes()) {
-                // if the match is empty, we need to make sure we don't use string
-                // indexing because the match may be "inside" a single multibyte character
-                // in that case
-                if mat.start() == mat.end() {
-                    continue
-                }
-                print!("{}{}",
-                       &path[prev..mat.start()],
-                       Red.paint(&path[mat.start()..mat.end()]));
-                prev = mat.end();
-            }
-            println!("{}", &path[prev..]);
+        if args.minimal {
+            println!("{}", attr);
         } else {
-            println!("{}", path);
+            print!("{:<40} {:>14} {:>1} {}",
+                   attr,
+                   size.separated_string(),
+                   typ,
+                   store_path.as_str());
+
+            let path = String::from_utf8_lossy(&path);
+
+            if args.color {
+                let mut prev = 0;
+                for mat in pattern.find_iter(path.as_bytes()) {
+                    // if the match is empty, we need to make sure we don't use string
+                    // indexing because the match may be "inside" a single multibyte character
+                    // in that case
+                    if mat.start() == mat.end() {
+                        continue
+                    }
+                    print!("{}{}",
+                           &path[prev..mat.start()],
+                           Red.paint(&path[mat.start()..mat.end()]));
+                    prev = mat.end();
+                }
+                println!("{}", &path[prev..]);
+            } else {
+                println!("{}", path);
+            }
         }
     }
 
@@ -190,7 +196,8 @@ fn process_args(matches: &ArgMatches) -> result::Result<Args, clap::Error> {
             }).collect()
         }),
         only_toplevel: matches.is_present("toplevel"),
-        color: color.unwrap_or_else(isatty::stdout_isatty)
+        color: color.unwrap_or_else(isatty::stdout_isatty),
+        minimal: matches.is_present("minimal"),
     };
     Ok(args)
 }
@@ -296,6 +303,13 @@ fn main() {
                    This means that the pattern `/bin/foo` only matches a file called `/bin/foo` or `/bin/foobar`\n\
                    but not `/libexec/bin/foo`."
             ))
+        .arg(Arg::with_name("minimal")
+             .short("1")
+             .long("minimal")
+             .help("Only print attribute names of found files or directories.\n\
+                    Other details such as size or store path are omitted.\n\
+                    This is useful for scripts that use the output of nix-locate."
+             ))
         .after_help(LONG_USAGE)
         .get_matches();
 
