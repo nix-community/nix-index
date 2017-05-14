@@ -65,9 +65,9 @@ The program '$cmd' is currently not installed. It is provided by
 several packages. You can install it by typing one of the following:
 EOF
 
-	          while read attr; do
+            while read attr; do
                 >&2 echo "  nix-env -iA $toplevel.$attr"
-	          done <<< "$attrs"
+            done <<< "$attrs"
             ;;
     esac
 
