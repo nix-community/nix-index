@@ -23,22 +23,55 @@ command_not_found_handle () {
         0)
             >&2 echo "$cmd: command not found"
             ;;
-        1) # TODO: add option to autorun with 1 match
-            >&2 echo "The program '$cmd' is currently not installed. You can install it"
-            >&2 echo "by typing:"
-            >&2 echo "  nix-env -iA $toplevel.$attrs"
+        1)
+            # if only 1 package provides this,
+            # then we can invoke it without asking the users
+            # of course if they have opted in with one of 2
+            # environment variables
+            # they are based on the ones in command-not-found.sh
+            #   NIX_AUTO_INSTALL : install the missing command into the
+            #                      user’s environment
+            #   NIX_AUTO_RUN     : run the command transparently inside of
+            #                      nix shell
+            # these will not return 127 if they worked correctly
+
+            # QUESTION: will this mess up some scripts if a broken script
+            #           fails to install?
+
+            if ! [ -z "$NIX_AUTO_INSTALL" ]; then
+                >&2 cat <<EOF
+The program '$cmd' is currently not installed. It is provided by
+the package '$toplevel.$attrs', which I will now install for you.
+EOF
+                nix-env -iA $toplevel.$attrs
+                $@ # TODO: handle pipes correctly if AUTO_RUN/INSTALL is possible
+                return $?
+            elif ! [ -z "$NIX_AUTO_RUN" ]; then
+                # how nix-shell handles commands is weird
+                # $(echo $@) is need to handle this
+                nix-shell -p $attrs --run "$(echo $@)"
+                return $?
+            else
+                >&2 cat <<EOF
+The program '$cmd' is currently not installed. You can install it
+by typing:
+  nix-env -iA $toplevel.$attrs
+EOF
+            fi
             ;;
         *)
-            >&2 echo "The program '$cmd' is currently not installed. It is provided by"
-            >&2 echo "several packages. You can install it by typing one of the following:"
+            >&2 cat <<EOF
+The program '$cmd' is currently not installed. It is provided by
+several packages. You can install it by typing one of the following:
+EOF
 
-	    echo -n "$attrs" | while read attr; do
+	          for attr in $(echo $attrs); do
                 >&2 echo "  nix-env -iA $toplevel.$attr"
-	    done
+	          done
             ;;
     esac
 
-    exit 127 # command not found should always exit with 127
+    return 127 # command not found should always exit with 127
 }
 
 # for zsh...
@@ -46,4 +79,5 @@ command_not_found_handle () {
 # apparently they work identically
 command_not_found_handler () {
     command_not_found_handle $@
+    return $?
 }
