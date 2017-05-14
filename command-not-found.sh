@@ -24,19 +24,19 @@ command_not_found_handle () {
             >&2 echo "$cmd: command not found"
             ;;
         1)
-            # if only 1 package provides this,
-            # then we can invoke it without asking the users
-            # of course if they have opted in with one of 2
-            # environment variables
-            # they are based on the ones in command-not-found.sh
+            # if only 1 package provides this, then we can invoke it
+            # without asking the users if they have opted in with one
+            # of 2 environment variables
+
+            # they are based on the ones found in
+            # command-not-found.sh:
+
             #   NIX_AUTO_INSTALL : install the missing command into the
             #                      user’s environment
             #   NIX_AUTO_RUN     : run the command transparently inside of
             #                      nix shell
-            # these will not return 127 if they worked correctly
 
-            # QUESTION: will this mess up some scripts if a broken script
-            #           fails to install?
+            # these will not return 127 if they worked correctly
 
             if ! [ -z "$NIX_AUTO_INSTALL" ]; then
                 >&2 cat <<EOF
@@ -44,13 +44,28 @@ The program '$cmd' is currently not installed. It is provided by
 the package '$toplevel.$attrs', which I will now install for you.
 EOF
                 nix-env -iA $toplevel.$attrs
-                $@ # TODO: handle pipes correctly if AUTO_RUN/INSTALL is possible
-                return $?
+                if [ "$?" -eq 0 ]; then
+                    $@ # TODO: handle pipes correctly if AUTO_RUN/INSTALL is possible
+                    return $?
+                else
+                    >&2 cat <<EOF
+Failed to install $toplevel.attrs.
+$cmd: command not found
+EOF
+                fi
             elif ! [ -z "$NIX_AUTO_RUN" ]; then
-                # how nix-shell handles commands is weird
-                # $(echo $@) is need to handle this
-                nix-shell -p $attrs --run "$(echo $@)"
-                return $?
+                nix-build --no-out-link -A $attrs "<$toplevel>"
+                if [ "$?" -eq 0 ]; then
+                    # how nix-shell handles commands is weird
+                    # $(echo $@) is need to handle this
+                    nix-shell -p $attrs --run "$(echo $@)"
+                    return $?
+                else
+                    >&2 cat <<EOF
+Failed to install $toplevel.attrs.
+$cmd: command not found
+EOF
+                fi
             else
                 >&2 cat <<EOF
 The program '$cmd' is currently not installed. You can install it
@@ -65,6 +80,8 @@ The program '$cmd' is currently not installed. It is provided by
 several packages. You can install it by typing one of the following:
 EOF
 
+            # ensure we get each element of attrs
+            # in a cross platform way
             while read attr; do
                 >&2 echo "  nix-env -iA $toplevel.$attr"
             done <<< "$attrs"
