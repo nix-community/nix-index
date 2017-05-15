@@ -11,7 +11,7 @@ buildRustPackage rec {
   version = "0.1.0";
 
   src = builtins.filterSource (name: type: !lib.hasPrefix "target" (baseNameOf name) && !lib.hasPrefix "result" (baseNameOf name) && name != ".git") ./.;
-  depsSha256 = "02yn2ssrhslyf7bcgaqgffbsnas3dwk0xc1z2h0by6q15yvhi7xm";
+  depsSha256 = "1sjm5aw456wqdyzf6zw71is2acs7534j083qr9mbsra3d2qqxrqj";
   buildInputs = [pkgconfig openssl curl];
 
   postInstall = ''

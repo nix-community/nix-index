@@ -9,7 +9,6 @@ extern crate grep;
 extern crate ordermap;
 extern crate regex;
 extern crate regex_syntax;
-extern crate rustc_serialize;
 extern crate serde;
 extern crate serde_json;
 extern crate tokio_core;
