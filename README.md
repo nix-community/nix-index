@@ -30,8 +30,12 @@ First, you need to generate an index by running `nix-index`. Then, you can use `
 As of 2017-04-23, there is an error when indexing `nixos-unstable` or `nixos-17.03` channels due to some haskell package failing to evaluate. The bug is fixed in `nixpkgs` master. You can use the following command instead that'll index a version of `nixpkgs-unstable` instead, which I verified works:
 
 ```
-$ nix-index -f https://d3g5gsiof5omrk.cloudfront.net/nixpkgs/nixpkgs-17.09pre105825.67adf69a16/nixexprs.tar.xz # this uses latest nixpkgs-unstable
+$ nix-index -f https://nixos.org/channels/nixpkgs-unstable/nixexprs.tar.xz # this uses latest nixpkgs-unstable
 ```
+
+###### Note
+
+Due to a bug in the code that generates the file listings for hydra NARs, some files are missing from the index. See https://github.com/NixOS/nix/pull/1386 for more details.
 
 ## Contributing
 If you find any missing features that you would like to implement, I'm very happy about any PRs! You can also create an issue first if the feature is more complex so we can discuss possible implementations.
