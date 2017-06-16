@@ -175,8 +175,8 @@ struct Args {
 /// The main function of this module: creates a new nix-index database.
 fn update_index(args: &Args, lp: &mut Core) -> Result<()> {
     errstln!("+ querying available packages");
-    // first tries to load the paths.cache if requested, otherwise queries
-    // the packages normally. Also falls back to normal querying if the paths.cache
+    // first try to load the paths.cache if requested, otherwise query
+    // the packages normally. Also fall back to normal querying if the paths.cache
     // fails to load.
     let fetcher = Fetcher::new(CACHE_URL.to_string(), lp.handle());
     let query = || -> Result<_> {
