@@ -1,5 +1,6 @@
 let
-  nixpkgsRev = "bd78749d3387f84d4f70dada335df04479f8170c";
+  # nixpkgs-unstable at 2017-06-16 10:24
+  nixpkgsRev = "afd2bdbad25db4b0007b52d07161345e6426ae72";
   defaultNixpkgs = builtins.fetchTarball "github.com/NixOS/nixpkgs/archive/${nixpkgsRev}.tar.gz";
 in
 { nixpkgs ? defaultNixpkgs }:
@@ -11,7 +12,7 @@ buildRustPackage rec {
   version = "0.1.0";
 
   src = builtins.filterSource (name: type: !lib.hasPrefix "target" (baseNameOf name) && !lib.hasPrefix "result" (baseNameOf name) && name != ".git") ./.;
-  depsSha256 = "1sjm5aw456wqdyzf6zw71is2acs7534j083qr9mbsra3d2qqxrqj";
+  depsSha256 = "0wynn3jn30wza3608h33x3psb26gz1bcmxc48pdixk0f620vpmjc";
   buildInputs = [pkgconfig openssl curl];
 
   postInstall = ''
