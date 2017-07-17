@@ -79,19 +79,23 @@ impl<T> FileNode<T> {
         use self::FileNode::*;
         match *self {
             Regular { size, executable } => {
-                (Regular {
-                     size: size,
-                     executable: executable,
-                 },
-                 None)
+                (
+                    Regular {
+                        size: size,
+                        executable: executable,
+                    },
+                    None,
+                )
             }
             Symlink { ref target } => (Symlink { target: target.clone() }, None),
             Directory { size, ref contents } => {
-                (Directory {
-                     size: size,
-                     contents: (),
-                 },
-                 Some(contents))
+                (
+                    Directory {
+                        size: size,
+                        contents: (),
+                    },
+                    Some(contents),
+                )
             }
         }
     }
@@ -128,34 +132,31 @@ impl FileNode<()> {
 
     pub fn decode(buf: &[u8]) -> Option<Self> {
         use self::FileNode::*;
-        buf.split_last()
-            .and_then(|(kind, buf)| match *kind {
-                          b'x' | b'r' => {
+        buf.split_last().and_then(|(kind, buf)| match *kind {
+            b'x' | b'r' => {
                 let executable = *kind == b'x';
-                str::from_utf8(buf)
-                    .ok()
-                    .and_then(|s| s.parse().ok())
-                    .map(|size| {
+                str::from_utf8(buf).ok().and_then(|s| s.parse().ok()).map(
+                    |size| {
                         Regular {
                             executable: executable,
                             size: size,
                         }
-                    })
+                    },
+                )
             }
-                          b's' => Some(Symlink { target: ByteBuf::from(buf) }),
-                          b'd' => {
-                              str::from_utf8(buf)
-                                  .ok()
-                                  .and_then(|s| s.parse().ok())
-                                  .map(|size| {
-                Directory {
-                    size: size,
-                    contents: (),
-                }
-            })
-                          }
-                          _ => None,
-                      })
+            b's' => Some(Symlink { target: ByteBuf::from(buf) }),
+            b'd' => {
+                str::from_utf8(buf).ok().and_then(|s| s.parse().ok()).map(
+                    |size| {
+                        Directory {
+                            size: size,
+                            contents: (),
+                        }
+                    },
+                )
+            }
+            _ => None,
+        })
     }
 }
 
@@ -199,9 +200,9 @@ impl FileTreeEntry {
 impl FileTree {
     pub fn regular(size: u64, executable: bool) -> Self {
         FileTree(FileNode::Regular {
-                     size: size,
-                     executable: executable,
-                 })
+            size: size,
+            executable: executable,
+        })
     }
 
     pub fn symlink(target: ByteBuf) -> Self {
@@ -210,9 +211,9 @@ impl FileTree {
 
     pub fn directory(entries: HashMap<ByteBuf, FileTree>) -> Self {
         FileTree(FileNode::Directory {
-                     size: entries.len() as u64,
-                     contents: entries,
-                 })
+            size: entries.len() as u64,
+            contents: entries,
+        })
     }
 
     pub fn to_list(&self) -> Vec<FileTreeEntry> {
@@ -236,9 +237,9 @@ impl FileTree {
                 }
             }
             result.push(FileTreeEntry {
-                            path: path,
-                            node: node,
-                        });
+                path: path,
+                node: node,
+            });
         }
         result
     }

@@ -55,15 +55,21 @@ impl PathOrigin {
     ///
     /// Returns any errors that were encountered while writing to the supplied `Writer`.
     pub fn encode<W: Write>(&self, writer: &mut W) -> io::Result<()> {
-        assert!(!self.attr.contains('\x02'),
-                "origin attribute path must not contain the byte value 0x02 anywhere");
-        assert!(!self.output.contains('\x02'),
-                "origin output name must not contain the byte value 0x02 aynwhere");
-        write!(writer,
-               "{}\x02{}{}",
-               self.attr,
-               self.output,
-               if self.toplevel { "" } else { "\x02" })?;
+        assert!(
+            !self.attr.contains('\x02'),
+            "origin attribute path must not contain the byte value 0x02 anywhere"
+        );
+        assert!(
+            !self.output.contains('\x02'),
+            "origin output name must not contain the byte value 0x02 aynwhere"
+        );
+        write!(
+            writer,
+            "{}\x02{}{}",
+            self.attr,
+            self.output,
+            if self.toplevel { "" } else { "\x02" }
+        )?;
         Ok(())
     }
 
@@ -87,10 +93,10 @@ impl PathOrigin {
                             }
                         }
                         Some(PathOrigin {
-                                 attr: attr,
-                                 output: output,
-                                 toplevel: toplevel,
-                             })
+                            attr: attr,
+                            output: output,
+                            toplevel: toplevel,
+                        })
                     })
             })
     }
@@ -137,25 +143,20 @@ impl StorePath {
     /// not check the length of the hash).
     pub fn parse(origin: PathOrigin, path: &str) -> Option<StorePath> {
         let mut parts = path.splitn(2, '-');
-        parts
-            .next()
-            .and_then(|prefix| {
-                parts
-                    .next()
-                    .and_then(|name| {
-                        let mut iter = prefix.rsplitn(2, '/');
-                        iter.next()
-                            .map(|hash| {
-                                let store_dir = iter.next().unwrap_or("");
-                                StorePath {
-                                    store_dir: store_dir.to_string(),
-                                    hash: hash.to_string(),
-                                    name: name.to_string(),
-                                    origin: origin,
-                                }
-                            })
-                    })
+        parts.next().and_then(|prefix| {
+            parts.next().and_then(|name| {
+                let mut iter = prefix.rsplitn(2, '/');
+                iter.next().map(|hash| {
+                    let store_dir = iter.next().unwrap_or("");
+                    StorePath {
+                        store_dir: store_dir.to_string(),
+                        hash: hash.to_string(),
+                        name: name.to_string(),
+                        origin: origin,
+                    }
+                })
             })
+        })
     }
 
     /// Encodes a store path as a sequence of bytes, so that it can be decoded with `decode`.
@@ -178,15 +179,15 @@ impl StorePath {
 
     pub fn decode(buf: &[u8]) -> Option<StorePath> {
         let mut parts = buf.splitn(2, |c| *c == b'\n');
-        parts
-            .next()
-            .and_then(|v| str::from_utf8(v).ok())
-            .and_then(|path| {
-                parts
-                    .next()
-                    .and_then(PathOrigin::decode)
-                    .and_then(|origin| StorePath::parse(origin, path))
-            })
+        parts.next().and_then(|v| str::from_utf8(v).ok()).and_then(
+            |path| {
+                parts.next().and_then(PathOrigin::decode).and_then(
+                    |origin| {
+                        StorePath::parse(origin, path)
+                    },
+                )
+            },
+        )
     }
 
     /// Returns the name of the store path, which is the part of the file name that

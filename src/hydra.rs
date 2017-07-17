@@ -141,11 +141,16 @@ impl Fetcher {
         url: String,
         encoding: Option<SupportedEncoding>,
     ) -> BoxFuture<(String, Option<Vec<u8>>)> {
-        let strategy = ExponentialBackoff::from_millis(50).limit_delay(Duration::from_millis(500)).limit_retries(20);
-        Box::new(strategy
-                     .run(self.timer.clone(),
-                          move || self.fetch_noretry(url.clone(), encoding))
-                     .from_err())
+        let strategy = ExponentialBackoff::from_millis(50)
+            .limit_delay(Duration::from_millis(500))
+            .limit_retries(20);
+        Box::new(
+            strategy
+                .run(self.timer.clone(), move || {
+                    self.fetch_noretry(url.clone(), encoding)
+                })
+                .from_err(),
+        )
     }
 
     /// The implementation of `fetch`, without the retry logic.
@@ -171,21 +176,28 @@ impl Fetcher {
             // from the response headers.
             let encoding = match encoding.or_else(|| compute_encoding(res.headers())) {
                 Some(e) => e,
-                None => return Either::A(future::err (
-                    ErrorKind::UnsupportedEncoding(url, res.headers().get::<ContentEncoding>().cloned()).into()
-                )),
+                None => {
+                    return Either::A(future::err(
+                        ErrorKind::UnsupportedEncoding(
+                            url,
+                            res.headers().get::<ContentEncoding>().cloned(),
+                        ).into(),
+                    ))
+                }
             };
 
-            let content = self.timer
-                .timeout_stream(res.body().map_err(Error::from),
-                                Duration::from_millis(RESPONSE_TIMEOUT_MS));
+            let content = self.timer.timeout_stream(
+                res.body().map_err(Error::from),
+                Duration::from_millis(RESPONSE_TIMEOUT_MS),
+            );
 
             use self::SupportedEncoding::*;
             let decoded = match encoding {
                 Xz => {
                     let result = content
-                        .fold((url, XzDecoder::new(Vec::new())),
-                              move |(url, mut decoder), chunk| {
+                        .fold((url, XzDecoder::new(Vec::new())), move |(url,
+                               mut decoder),
+                              chunk| {
                             decoder
                                 .write_all(&chunk)
                                 .chain_err(|| ErrorKind::Decode(url.clone()))
@@ -202,8 +214,9 @@ impl Fetcher {
 
                 Brotli => {
                     let result = content
-                        .fold((url, BrotliDecoder::new(Vec::new())),
-                              move |(url, mut decoder), chunk| {
+                        .fold((url, BrotliDecoder::new(Vec::new())), move |(url,
+                               mut decoder),
+                              chunk| {
                             decoder
                                 .write_all(&chunk)
                                 .chain_err(|| ErrorKind::Decode(url.clone()))
@@ -235,19 +248,17 @@ impl Fetcher {
 
         let make_request = move |u| {
             let mut request = Request::new(Method::Get, u);
-            request.headers_mut().set(
-                AcceptEncoding(vec![
-                    qitem(Encoding::Brotli),
-                    qitem(Encoding::Gzip),
-                    qitem(Encoding::Deflate),
-                ])
-            );
+            request.headers_mut().set(AcceptEncoding(vec![
+                qitem(Encoding::Brotli),
+                qitem(Encoding::Gzip),
+                qitem(Encoding::Deflate),
+            ]));
             self.client.request(request).from_err()
         };
 
-        Box::new(future::result(uri)
-                     .and_then(make_request)
-                     .and_then(process_response))
+        Box::new(future::result(uri).and_then(make_request).and_then(
+            process_response,
+        ))
     }
 
     /// Fetches the references of a given store path.
@@ -271,7 +282,9 @@ impl Fetcher {
             for line in data.split(|x| x == &b'\n') {
                 if line.starts_with(references) {
                     let line = &line[references.len()..];
-                    let line = str::from_utf8(line).map_err(|e| ErrorKind::Unicode(url.clone(), line.to_vec(), e))?;
+                    let line = str::from_utf8(line).map_err(|e| {
+                        ErrorKind::Unicode(url.clone(), line.to_vec(), e)
+                    })?;
                     result = line.trim()
                         .split_whitespace()
                         .map(|new_path| {
@@ -288,7 +301,9 @@ impl Fetcher {
 
                 if line.starts_with(store_path) {
                     let line = &line[references.len()..];
-                    let line = str::from_utf8(line).map_err(|e| ErrorKind::Unicode(url.clone(), line.to_vec(), e))?;
+                    let line = str::from_utf8(line).map_err(|e| {
+                        ErrorKind::Unicode(url.clone(), line.to_vec(), e)
+                    })?;
                     let line = line.trim();
 
                     path =
@@ -315,11 +330,12 @@ impl Fetcher {
         let url_generic = format!("{}/{}.ls", self.cache_url, path.hash());
         let name = format!("{}.json", path.hash());
 
-        let fetched = self.fetch(url_generic, None)
-            .and_then(move |(url, r)| match r {
-                          Some(v) => Either::A(future::ok((url, Some(v)))),
-                          None => Either::B(self.fetch(url_xz, Some(SupportedEncoding::Xz))),
-                      });
+        let fetched = self.fetch(url_generic, None).and_then(
+            move |(url, r)| match r {
+                Some(v) => Either::A(future::ok((url, Some(v)))),
+                None => Either::B(self.fetch(url_xz, Some(SupportedEncoding::Xz))),
+            },
+        );
 
         let parse_response = move |(url, res)| {
             let url: String = url;
@@ -331,25 +347,26 @@ impl Fetcher {
 
             let now = Instant::now();
             let response: FileListingResponse = serde_json::from_slice(&contents).chain_err(|| {
-                    ErrorKind::ParseResponse(url,
-                                             util::write_temp_file("file_listing.json", &contents))
-                })?;
+                ErrorKind::ParseResponse(url, util::write_temp_file("file_listing.json", &contents))
+            })?;
             let duration = now.elapsed();
 
             if duration > Duration::from_millis(2000) {
                 let secs = duration.as_secs();
                 let millis = duration.subsec_nanos() / 1000000;
 
-                writeln!(&mut io::stderr(),
-                         "warning: took a long time to parse: {}s:{:03}ms",
-                         secs,
-                         millis)
-                        .unwrap_or(());
+                writeln!(
+                    &mut io::stderr(),
+                    "warning: took a long time to parse: {}s:{:03}ms",
+                    secs,
+                    millis
+                ).unwrap_or(());
                 if let Some(p) = util::write_temp_file(&name, &contents) {
-                    writeln!(&mut io::stderr(),
-                             "saved response to file: {}",
-                             p.to_string_lossy())
-                            .unwrap_or(());
+                    writeln!(
+                        &mut io::stderr(),
+                        "saved response to file: {}",
+                        p.to_string_lossy()
+                    ).unwrap_or(());
                 }
             }
 
@@ -491,7 +508,7 @@ impl Deserialize for HydraFileListing {
 
                 // the type field must always be present so we know which type to expect
                 let typ = &try!(typ.ok_or_else(|| serde::de::Error::missing_field("type"))) as
-                          &[u8];
+                    &[u8];
 
                 match typ {
                     b"regular" => {
@@ -500,19 +517,23 @@ impl Deserialize for HydraFileListing {
                         Ok(FileTree::regular(size, executable))
                     }
                     b"directory" => {
-                        let entries =
-                            entries.ok_or_else(|| serde::de::Error::missing_field("entries"))?;
+                        let entries = entries.ok_or_else(
+                            || serde::de::Error::missing_field("entries"),
+                        )?;
                         let entries = entries.into_iter().map(|(k, v)| (k, v.0)).collect();
                         Ok(FileTree::directory(entries))
                     }
                     b"symlink" => {
-                        let target =
-                            target.ok_or_else(|| serde::de::Error::missing_field("target"))?;
+                        let target = target.ok_or_else(
+                            || serde::de::Error::missing_field("target"),
+                        )?;
                         Ok(FileTree::symlink(target))
                     }
                     _ => {
-                        Err(serde::de::Error::unknown_variant(&String::from_utf8_lossy(typ),
-                                                              VARIANTS))
+                        Err(serde::de::Error::unknown_variant(
+                            &String::from_utf8_lossy(typ),
+                            VARIANTS,
+                        ))
                     }
                 }
             }

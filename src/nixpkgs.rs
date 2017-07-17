@@ -22,10 +22,7 @@ use package::{PathOrigin, StorePath};
 /// of `attr` are returned.
 ///
 /// The function returns an Iterator over the packages returned by nix-env.
-pub fn query_packages(
-    nixpkgs: &str,
-    scope: Option<&str>,
-) -> PackagesQuery<ChildStdout> {
+pub fn query_packages(nixpkgs: &str, scope: Option<&str>) -> PackagesQuery<ChildStdout> {
     let mut cmd = Command::new("nix-env");
     cmd.arg("-qaP")
         .arg("--out-path")
@@ -92,16 +89,9 @@ impl PackagesQuery<ChildStdout> {
                 let message = String::from_utf8_lossy(&result.stderr);
 
                 return Err(Error::Command(match result.status.code() {
-                                              Some(c) => {
-                                                  format!("nix-env failed with exit code {}:\n{}",
-                                                          c,
-                                                          message)
-                                              }
-                                              None => {
-                                                  format!("nix-env failed with unknown exit code:\n{}",
-                                                          message)
-                                              }
-                                          }));
+                    Some(c) => format!("nix-env failed with exit code {}:\n{}", c, message),
+                    None => format!("nix-env failed with unknown exit code:\n{}", message),
+                }));
             }
 
             Ok(())
@@ -196,37 +186,45 @@ impl fmt::Display for ParserError {
                 ref element_name,
                 ref expected_parent,
             } => {
-                write!(f,
-                       "element {} appears outside of expected parent {}",
-                       element_name,
-                       expected_parent)
+                write!(
+                    f,
+                    "element {} appears outside of expected parent {}",
+                    element_name,
+                    expected_parent
+                )
             }
             ParentNotAllowed {
                 ref element_name,
                 ref found_parent,
             } => {
-                write!(f,
-                       "element {} must not appear as child of {}",
-                       element_name,
-                       found_parent)
+                write!(
+                    f,
+                    "element {} must not appear as child of {}",
+                    element_name,
+                    found_parent
+                )
             }
             MissingAttribute {
                 ref element_name,
                 ref attribute_name,
             } => {
-                write!(f,
-                       "element {} must have an attribute named {}",
-                       element_name,
-                       attribute_name)
+                write!(
+                    f,
+                    "element {} must have an attribute named {}",
+                    element_name,
+                    attribute_name
+                )
             }
             MissingStartTag { ref element_name } => {
                 write!(f, "element {} does not have a start tag", element_name)
             }
             XmlError { ref error } => write!(f, "document not well-formed: {}", error),
             InvalidStorePath { ref path } => {
-                write!(f,
-                       "store path does not match expected format /prefix/hash-name: {}",
-                       path)
+                write!(
+                    f,
+                    "store path does not match expected format /prefix/hash-name: {}",
+                    path
+                )
             }
         }
     }
@@ -261,9 +259,9 @@ impl<R: Read> PackagesParser<R> {
         use self::ParserErrorKind::*;
 
         loop {
-            let event = self.events
-                .next()
-                .map_err(|e| self.err(XmlError { error: e }))?;
+            let event = self.events.next().map_err(
+                |e| self.err(XmlError { error: e }),
+            )?;
             match event {
                 StartElement {
                     name: element_name,
@@ -273,20 +271,20 @@ impl<R: Read> PackagesParser<R> {
                     if element_name.local_name == "item" {
                         if !self.current_item.is_none() {
                             return Err(self.err(ParentNotAllowed {
-                                                    element_name: "item".to_string(),
-                                                    found_parent: "item".to_string(),
-                                                }));
+                                element_name: "item".to_string(),
+                                found_parent: "item".to_string(),
+                            }));
                         }
 
-                        let attr_path = attributes
-                            .into_iter()
-                            .find(|a| a.name.local_name == "attrPath");
+                        let attr_path = attributes.into_iter().find(
+                            |a| a.name.local_name == "attrPath",
+                        );
                         let attr_path = attr_path.ok_or_else(|| {
-                                self.err(MissingAttribute {
-                                             element_name: "item".into(),
-                                             attribute_name: "attrPath".into(),
-                                         })
-                            })?;
+                            self.err(MissingAttribute {
+                                element_name: "item".into(),
+                                attribute_name: "attrPath".into(),
+                            })
+                        })?;
 
                         self.current_item = Some(attr_path.value);
                         continue;
@@ -310,18 +308,18 @@ impl<R: Read> PackagesParser<R> {
                             }
 
                             let output_name = output_name.ok_or_else(|| {
-                                    self.err(MissingAttribute {
-                                                 element_name: "output".into(),
-                                                 attribute_name: "name".into(),
-                                             })
-                                })?;
+                                self.err(MissingAttribute {
+                                    element_name: "output".into(),
+                                    attribute_name: "name".into(),
+                                })
+                            })?;
 
                             let output_path = output_path.ok_or_else(|| {
-                                    self.err(MissingAttribute {
-                                                 element_name: "output".into(),
-                                                 attribute_name: "path".into(),
-                                             })
-                                })?;
+                                self.err(MissingAttribute {
+                                    element_name: "output".into(),
+                                    attribute_name: "path".into(),
+                                })
+                            })?;
 
                             let origin = PathOrigin {
                                 attr: item,
@@ -329,17 +327,16 @@ impl<R: Read> PackagesParser<R> {
                                 toplevel: true,
                             };
                             let store_path = StorePath::parse(origin, &output_path);
-                            let store_path =
-                                store_path.ok_or_else(|| {
-                                        self.err(InvalidStorePath { path: output_path })
-                                    })?;
+                            let store_path = store_path.ok_or_else(|| {
+                                self.err(InvalidStorePath { path: output_path })
+                            })?;
 
                             return Ok(Some(store_path));
                         } else {
                             return Err(self.err(MissingParent {
-                                                    element_name: "output".into(),
-                                                    expected_parent: "item".into(),
-                                                }));
+                                element_name: "output".into(),
+                                expected_parent: "item".into(),
+                            }));
                         }
                     }
                 }
@@ -394,7 +391,7 @@ impl error::Error for Error {
         match *self {
             Error::Parse(_) => "nix-env output parse error",
             Error::Io(_) => "io error",
-            Error::Command(_) => "nix-env error"
+            Error::Command(_) => "nix-env error",
         }
     }
 }

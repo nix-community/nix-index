@@ -32,7 +32,7 @@ use void::ResultVoidExt;
 
 use nix_index::database;
 use nix_index::files::FileTree;
-use nix_index::hydra::{Fetcher};
+use nix_index::hydra::Fetcher;
 use nix_index::package::StorePath;
 use nix_index::nixpkgs;
 use nix_index::workset::{WorkSet, WorkSetWatch, WorkSetHandle};
@@ -100,9 +100,7 @@ fn fetch_file_listings(
 ) -> (FileListingStream, WorkSetWatch) {
     // Create the queue that will hold all the paths that still need processing.
     // Initially, only the starting set needs processing.
-    let workset = WorkSet::from_iter(starting_set
-                                         .into_iter()
-                                         .map(|x| (x.hash().into_owned(), x)));
+    let workset = WorkSet::from_iter(starting_set.into_iter().map(|x| (x.hash().into_owned(), x)));
 
     // Processes a single store path, fetching the file listing for it and
     // adding its references to the queue
@@ -118,12 +116,10 @@ fn fetch_file_listings(
                 Ok(path)
             })
             .and_then(move |path| {
-                fetcher
-                    .fetch_files(&path)
-                    .then(move |r| {
-                        let files = r.chain_err(|| ErrorKind::FetchFiles(path.clone()))?;
-                        Ok((path, files))
-                    })
+                fetcher.fetch_files(&path).then(move |r| {
+                    let files = r.chain_err(|| ErrorKind::FetchFiles(path.clone()))?;
+                    Ok((path, files))
+                })
             })
     };
 
@@ -148,10 +144,9 @@ fn try_load_paths_cache() -> Result<Option<(FileListingStream<'static>, WorkSetW
 
     let mut input = io::BufReader::new(file);
     let fetched: Vec<(StorePath, FileTree)> =
-        bincode::deserialize_from(&mut input, bincode::Infinite).chain_err(|| ErrorKind::LoadPathsCache)?;
-    let workset = WorkSet::from_iter(fetched
-                                         .into_iter()
-                                         .map(|(path, tree)| {
+        bincode::deserialize_from(&mut input, bincode::Infinite)
+            .chain_err(|| ErrorKind::LoadPathsCache)?;
+    let workset = WorkSet::from_iter(fetched.into_iter().map(|(path, tree)| {
         (path.hash().to_string(), (path, Some(tree)))
     }));
     let watch = workset.watch();
@@ -184,7 +179,7 @@ fn update_index(args: &Args, lp: &mut Core) -> Result<()> {
             if let Some(cached) = try_load_paths_cache()? {
                 return Ok(cached);
             }
-        } 
+        }
 
         // These are the paths that show up in `nix-env -qa`.
         let normal_paths = nixpkgs::query_packages(&args.nixpkgs, None);
@@ -203,7 +198,7 @@ fn update_index(args: &Args, lp: &mut Core) -> Result<()> {
             "haskellPackages",
             "rPackages",
             "nodePackages",
-            "coqPackages"
+            "coqPackages",
         ];
 
         let all_paths = normal_paths.chain(extra_scopes.into_iter().flat_map(|scope| {
@@ -239,28 +234,37 @@ fn update_index(args: &Args, lp: &mut Core) -> Result<()> {
     });
 
     errst!("+ generating index\r");
-    fs::create_dir_all(&args.database).chain_err(|| ErrorKind::CreateDatabaseDir(args.database.clone()))?;
+    fs::create_dir_all(&args.database).chain_err(|| {
+        ErrorKind::CreateDatabaseDir(args.database.clone())
+    })?;
     let mut db = database::Writer::create(args.database.join("files"), args.compression_level)
         .chain_err(|| ErrorKind::CreateDatabase(args.database.clone()))?;
 
     let mut results: Vec<(StorePath, FileTree)> = Vec::new();
     lp.run(requests.for_each(|entry| -> Result<_> {
         if args.path_cache {
-                results.push(entry.clone());
+            results.push(entry.clone());
         }
         let (path, files) = entry;
-        db.add(path, files).chain_err(|| ErrorKind::WriteDatabase(args.database.clone()))?;
+        db.add(path, files).chain_err(|| {
+            ErrorKind::WriteDatabase(args.database.clone())
+        })?;
         Ok(())
     }))?;
     errstln!("");
 
     if args.path_cache {
         errstln!("+ writing path cache");
-        let mut output = io::BufWriter::new(File::create("paths.cache").chain_err(|| ErrorKind::WritePathsCache)?);
-        bincode::serialize_into(&mut output, &results, bincode::Infinite).chain_err(|| ErrorKind::WritePathsCache)?;
+        let mut output = io::BufWriter::new(File::create("paths.cache").chain_err(
+            || ErrorKind::WritePathsCache,
+        )?);
+        bincode::serialize_into(&mut output, &results, bincode::Infinite)
+            .chain_err(|| ErrorKind::WritePathsCache)?;
     }
 
-    let index_size = db.finish().chain_err(|| ErrorKind::WriteDatabase(args.database.clone()))?;
+    let index_size = db.finish().chain_err(|| {
+        ErrorKind::WriteDatabase(args.database.clone())
+    })?;
     errstln!("+ wrote index of {} bytes", index_size.separated_string());
 
     Ok(())

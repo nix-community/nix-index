@@ -189,9 +189,9 @@ impl<R: BufRead> Decoder<R> {
 
         if self.shared_len < 0 || self.last_path + shared_len > self.pos {
             bail!(ErrorKind::SharedOutOfRange {
-                      previous_len: self.pos - self.last_path,
-                      shared_len: self.shared_len,
-                  });
+                previous_len: self.pos - self.last_path,
+                shared_len: self.shared_len,
+            });
         }
 
         let (_, last) = self.buf.split_at_mut(self.last_path);
@@ -215,11 +215,11 @@ impl<R: BufRead> Decoder<R> {
         loop {
             let (done, len) = {
                 let &mut Decoder {
-                             ref mut reader,
-                             ref mut buf,
-                             ref mut pos,
-                             ..
-                         } = self;
+                    ref mut reader,
+                    ref mut buf,
+                    ref mut pos,
+                    ..
+                } = self;
                 let input = match reader.fill_buf() {
                     Ok(data) => data,
                     Err(ref e) if e.kind() == io::ErrorKind::Interrupted => continue,
@@ -256,17 +256,17 @@ impl<R: BufRead> Decoder<R> {
     /// if the end of input has been reached.
     fn decode_prefix_diff(&mut self) -> Result<i16> {
         let mut buf = [0; 1];
-        self.reader
-            .read_exact(&mut buf)
-            .chain_err(|| ErrorKind::MissingPrefixDifferential)?;
+        self.reader.read_exact(&mut buf).chain_err(|| {
+            ErrorKind::MissingPrefixDifferential
+        })?;
 
         if buf[0] != 0x80 {
             Ok((buf[0] as i8) as i16)
         } else {
             let mut buf = [0; 2];
-            self.reader
-                .read_exact(&mut buf)
-                .chain_err(|| ErrorKind::MissingPrefixDifferential)?;
+            self.reader.read_exact(&mut buf).chain_err(|| {
+                ErrorKind::MissingPrefixDifferential
+            })?;
             let high = buf[0] as i16;
             let low = buf[1] as i16;
             Ok(high << 8 | low)
@@ -357,14 +357,12 @@ impl<R: BufRead> Decoder<R> {
             let diff = self.decode_prefix_diff()? as isize;
 
             // Update the shared len
-            self.shared_len = self.shared_len
-                .checked_add(diff)
-                .ok_or_else(|| {
-                    ErrorKind::SharedOverflow {
-                        shared_len: self.shared_len,
-                        diff: diff,
-                    }
-                })?;
+            self.shared_len = self.shared_len.checked_add(diff).ok_or_else(|| {
+                ErrorKind::SharedOverflow {
+                    shared_len: self.shared_len,
+                    diff: diff,
+                }
+            })?;
 
             // Copy the shared prefix
             if !self.copy_shared()? {
@@ -373,8 +371,11 @@ impl<R: BufRead> Decoder<R> {
         }
 
         // Since we don't want to return partially decoded items, we need to find the end of the last entry.
-        self.partial_entry_start =
-            memchr::memrchr(b'\n', &self.buf[..self.pos]).ok_or_else(|| ErrorKind::MissingNewline)? + 1;
+        self.partial_entry_start = memchr::memrchr(b'\n', &self.buf[..self.pos]).ok_or_else(
+            || {
+                ErrorKind::MissingNewline
+            },
+        )? + 1;
         Ok(&mut self.buf[item_start..self.partial_entry_start])
     }
 }
@@ -424,14 +425,22 @@ impl<W: Write> Encoder<W> {
     ///
     /// If either `footer_meta` or `footer_path` contain NUL or newline bytes.
     pub fn new(writer: W, footer_meta: Vec<u8>, footer_path: Vec<u8>) -> Encoder<W> {
-        assert!(!footer_meta.contains(&b'\x00'),
-                "footer meta must not contain null bytes");
-        assert!(!footer_path.contains(&b'\x00'),
-                "footer path must not contain null bytes");
-        assert!(!footer_meta.contains(&b'\n'),
-                "footer meta must not contain newlines");
-        assert!(!footer_path.contains(&b'\n'),
-                "footer path must not contain newlines");
+        assert!(
+            !footer_meta.contains(&b'\x00'),
+            "footer meta must not contain null bytes"
+        );
+        assert!(
+            !footer_path.contains(&b'\x00'),
+            "footer path must not contain null bytes"
+        );
+        assert!(
+            !footer_meta.contains(&b'\n'),
+            "footer meta must not contain newlines"
+        );
+        assert!(
+            !footer_path.contains(&b'\n'),
+            "footer path must not contain newlines"
+        );
         Encoder {
             writer: writer,
             last: Vec::new(),
@@ -467,8 +476,10 @@ impl<W: Write> Encoder<W> {
     ///
     /// If the meta data contains NUL bytes or newlines.
     pub fn write_meta(&mut self, meta: &[u8]) -> io::Result<()> {
-        assert!(!meta.contains(&b'\x00'),
-                "entry must not contain null bytes");
+        assert!(
+            !meta.contains(&b'\x00'),
+            "entry must not contain null bytes"
+        );
         assert!(!meta.contains(&b'\n'), "entry must not contain newlines");
 
         self.writer.write_all(meta)?;
@@ -487,8 +498,10 @@ impl<W: Write> Encoder<W> {
     ///
     /// If the path contains NUL bytes or newlines.
     pub fn write_path(&mut self, path: Vec<u8>) -> io::Result<()> {
-        assert!(!path.contains(&b'\x00'),
-                "entry must not contain null bytes");
+        assert!(
+            !path.contains(&b'\x00'),
+            "entry must not contain null bytes"
+        );
         assert!(!path.contains(&b'\x00'), "entry must not contain newlines");
         self.writer.write_all(&[b'\x00'])?;
 

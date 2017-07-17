@@ -154,10 +154,12 @@ struct WorkSetObserverImpl<K, V> {
 
 impl<K, V> WorkSetObserver for WorkSetObserverImpl<K, V> {
     fn queue_len(&self) -> usize {
-        self.state
-            .upgrade()
-            .map_or(0,
-                    |shared: Rc<RefCell<Shared<K, V>>>| shared.as_ref().borrow().queue.len())
+        self.state.upgrade().map_or(
+            0,
+            |shared: Rc<RefCell<Shared<K, V>>>| {
+                shared.as_ref().borrow().queue.len()
+            },
+        )
     }
 }
 
@@ -195,12 +197,12 @@ impl<K: Hash + Eq, V> Stream for WorkSet<K, V> {
             Some(e) => e,
             None => {
                 return Ok({
-                              if Rc::strong_count(&self.state) == 1 {
-                                  Async::Ready(None)
-                              } else {
-                                  Async::NotReady
-                              }
-                          })
+                    if Rc::strong_count(&self.state) == 1 {
+                        Async::Ready(None)
+                    } else {
+                        Async::NotReady
+                    }
+                })
             }
         };
 

@@ -56,7 +56,9 @@ struct Args {
 /// The main function of this module: searches with the given options in the database.
 fn locate(args: &Args) -> Result<()> {
     // Build the regular expression matcher
-    let pattern = Regex::new(&args.pattern).chain_err(|| ErrorKind::Grep(args.pattern.clone()))?;
+    let pattern = Regex::new(&args.pattern).chain_err(|| {
+        ErrorKind::Grep(args.pattern.clone())
+    })?;
     let package_pattern = if let Some(ref pat) = args.package_pattern {
         Some(Regex::new(pat).chain_err(|| ErrorKind::Grep(pat.clone()))?)
     } else {
@@ -65,37 +67,37 @@ fn locate(args: &Args) -> Result<()> {
 
     // Open the database
     let index_file = args.database.join("files");
-    let mut db = database::Reader::open(&index_file).chain_err(|| ErrorKind::ReadDatabase(index_file.clone()))?;
+    let mut db = database::Reader::open(&index_file).chain_err(|| {
+        ErrorKind::ReadDatabase(index_file.clone())
+    })?;
 
-    let results = db.find_iter(&pattern).chain_err(|| ErrorKind::Grep(args.pattern.clone()))?
+    let results = db.find_iter(&pattern)
+        .chain_err(|| ErrorKind::Grep(args.pattern.clone()))?
         .filter(|v| {
-            v.as_ref()
-                .ok()
-                .map_or(true, |v| {
-                    let &(ref store_path, FileTreeEntry { ref path, ref node }) = v;
-                    let m = match pattern.find_iter(path).last() {
-                        Some(m) => m,
-                        None => return false,
-                    };
+            v.as_ref().ok().map_or(true, |v| {
+                let &(ref store_path, FileTreeEntry { ref path, ref node }) = v;
+                let m = match pattern.find_iter(path).last() {
+                    Some(m) => m,
+                    None => return false,
+                };
 
-                    let conditions = [
-                        !args.group || !path[m.end()..].contains(&b'/'),
-                        !args.only_toplevel || (*store_path.origin()).toplevel,
-                        args.hash
-                            .as_ref()
-                            .map_or(true, |h| h == &store_path.hash()),
-                        package_pattern
-                            .as_ref()
-                            .map_or(true, |r| r.is_match(store_path.name().as_bytes())),
-                        args.file_type.iter().any(|t| &node.get_type() == t),
-                    ];
+                let conditions = [
+                    !args.group || !path[m.end()..].contains(&b'/'),
+                    !args.only_toplevel || (*store_path.origin()).toplevel,
+                    args.hash.as_ref().map_or(true, |h| h == &store_path.hash()),
+                    package_pattern.as_ref().map_or(true, |r| {
+                        r.is_match(store_path.name().as_bytes())
+                    }),
+                    args.file_type.iter().any(|t| &node.get_type() == t),
+                ];
 
-                    conditions.iter().all(|c| *c)
-                })
+                conditions.iter().all(|c| *c)
+            })
         });
 
     for v in results {
-        let (store_path, FileTreeEntry { path, node }) = v.chain_err(|| ErrorKind::ReadDatabase(index_file.clone()))?;
+        let (store_path, FileTreeEntry { path, node }) =
+            v.chain_err(|| ErrorKind::ReadDatabase(index_file.clone()))?;
 
         use files::FileNode::*;
         let (typ, size) = match node {
@@ -104,9 +106,11 @@ fn locate(args: &Args) -> Result<()> {
             Symlink { .. } => ("s", 0),
         };
 
-        let mut attr = format!("{}.{}",
-                               store_path.origin().attr,
-                               store_path.origin().output);
+        let mut attr = format!(
+            "{}.{}",
+            store_path.origin().attr,
+            store_path.origin().output
+        );
 
         if !store_path.origin().toplevel {
             attr = format!("({})", attr);
@@ -115,11 +119,13 @@ fn locate(args: &Args) -> Result<()> {
         if args.minimal {
             println!("{}", attr);
         } else {
-            print!("{:<40} {:>14} {:>1} {}",
-                   attr,
-                   size.separated_string(),
-                   typ,
-                   store_path.as_str());
+            print!(
+                "{:<40} {:>14} {:>1} {}",
+                attr,
+                size.separated_string(),
+                typ,
+                store_path.as_str()
+            );
 
             let path = String::from_utf8_lossy(&path);
 
@@ -130,11 +136,13 @@ fn locate(args: &Args) -> Result<()> {
                     // indexing because the match may be "inside" a single multibyte character
                     // in that case
                     if mat.start() == mat.end() {
-                        continue
+                        continue;
                     }
-                    print!("{}{}",
-                           &path[prev..mat.start()],
-                           Red.paint(&path[mat.start()..mat.end()]));
+                    print!(
+                        "{}{}",
+                        &path[prev..mat.start()],
+                        Red.paint(&path[mat.start()..mat.end()])
+                    );
                     prev = mat.end();
                 }
                 println!("{}", &path[prev..]);
@@ -156,30 +164,36 @@ fn process_args(matches: &ArgMatches) -> result::Result<Args, clap::Error> {
         .expect("pattern arg required")
         .to_string();
     let package_arg = matches.value_of("package");
-    let start_anchor = if matches.is_present("at-root") { "^" } else { "" };
+    let start_anchor = if matches.is_present("at-root") {
+        "^"
+    } else {
+        ""
+    };
     let end_anchor = if matches.is_present("whole") { "$" } else { "" };
     let make_pattern = |s: &str, wrap: bool| {
-        let regex = if matches.is_present("regex") { s.to_string() } else { regex::escape(s) };
+        let regex = if matches.is_present("regex") {
+            s.to_string()
+        } else {
+            regex::escape(s)
+        };
         if wrap {
             format!("{}{}{}", start_anchor, regex, end_anchor)
         } else {
             regex
         }
     };
-    let color = matches
-        .value_of("color")
-        .and_then(|x| {
-            if x == "auto" {
-                return None;
-            }
-            if x == "always" {
-                return Some(true);
-            }
-            if x == "never" {
-                return Some(false);
-            }
-            unreachable!("color can only be auto, always or never (verified by clap already)")
-        });
+    let color = matches.value_of("color").and_then(|x| {
+        if x == "auto" {
+            return None;
+        }
+        if x == "always" {
+            return Some(true);
+        }
+        if x == "never" {
+            return Some(false);
+        }
+        unreachable!("color can only be auto, always or never (verified by clap already)")
+    });
     let args = Args {
         database: PathBuf::from(matches.value_of("database").expect("database has default value by clap")),
         group: !matches.is_present("no-group"),

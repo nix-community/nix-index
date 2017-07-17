@@ -7,8 +7,8 @@ use std::fs::File;
 use std::path::Path;
 use zstd;
 use grep::{self, Grep, Match, GrepBuilder};
-use regex_syntax::{Expr};
-use regex::bytes::{Regex};
+use regex_syntax::Expr;
+use regex::bytes::Regex;
 use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
 use serde_json;
 
@@ -148,7 +148,9 @@ impl Reader {
         }
 
         let decoder = zstd::Decoder::new(file)?;
-        Ok(Reader { decoder: frcode::Decoder::new(BufReader::new(decoder)) })
+        Ok(Reader {
+            decoder: frcode::Decoder::new(BufReader::new(decoder)),
+        })
     }
 
     /// Finds all entries in the database that have a filename matching the given pattern.
@@ -166,15 +168,19 @@ impl Reader {
             let mut stack = vec![&mut expr];
             while let Some(e) = stack.pop() {
                 match *e {
-                    Expr::StartText => *e = Expr::LiteralBytes { bytes: b"\0".to_vec(), casei: false },
+                    Expr::StartText => {
+                        *e = Expr::LiteralBytes {
+                            bytes: b"\0".to_vec(),
+                            casei: false,
+                        }
+                    }
                     Expr::Group { ref mut e, .. } => stack.push(e),
                     Expr::Repeat { ref mut e, .. } => stack.push(e),
-                    Expr::Concat(ref mut exprs) | Expr::Alternate(ref mut exprs) => {
-                        stack.extend(exprs)
-                    }
+                    Expr::Concat(ref mut exprs) |
+                    Expr::Alternate(ref mut exprs) => stack.extend(exprs),
                     _ => {}
                 }
-            };
+            }
         }
         let pattern = GrepBuilder::new(&format!("{}", expr)).build()?;
         Ok(ReaderIter {
@@ -192,7 +198,9 @@ impl Reader {
     pub fn dump(&mut self) -> Result<()> {
         loop {
             let block = self.decoder.decode()?;
-            if block.is_empty() { break }
+            if block.is_empty() {
+                break;
+            }
             for line in block.split(|c| *c == b'\n') {
                 println!("{:?}", String::from_utf8_lossy(line));
             }
@@ -235,10 +243,10 @@ impl<'a, 'b> ReaderIter<'a, 'b> {
         // the input is processed in blocks until we've found at least a single entry
         while self.found.is_empty() {
             let &mut ReaderIter {
-                         ref mut reader,
-                         ref package_entry_pattern,
-                         ..
-                     } = self;
+                ref mut reader,
+                ref package_entry_pattern,
+                ..
+            } = self;
             let block = reader.decoder.decode()?;
 
             // if the block is empty, the end of input has been reached
@@ -269,7 +277,9 @@ impl<'a, 'b> ReaderIter<'a, 'b> {
                 }
 
                 let json = &block[mat.start() + 2..mat.end() - 1];
-                let pkg: StorePath = serde_json::from_slice(json).chain_err(|| ErrorKind::StorePathParse(json.to_vec()))?;
+                let pkg: StorePath = serde_json::from_slice(json).chain_err(|| {
+                    ErrorKind::StorePathParse(json.to_vec())
+                })?;
                 cached_package = Some((pkg.clone(), mat.end()));
                 Ok(Some(pkg))
             };
@@ -297,7 +307,7 @@ impl<'a, 'b> ReaderIter<'a, 'b> {
 
                 // check for false positives
                 if !self.exact_pattern.is_match(&entry.path) {
-                    continue
+                    continue;
                 }
 
                 match find_package(mat.end())? {

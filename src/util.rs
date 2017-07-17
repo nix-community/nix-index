@@ -21,10 +21,9 @@ pub fn write_temp_file(base_name: &str, contents: &[u8]) -> Option<PathBuf> {
         } else {
             this_path.push(format!("{}.{}", base_name, i));
         }
-        let temp_file = OpenOptions::new()
-            .write(true)
-            .create_new(true)
-            .open(&this_path);
+        let temp_file = OpenOptions::new().write(true).create_new(true).open(
+            &this_path,
+        );
         match temp_file {
             Ok(mut file) => {
                 path = file.write_all(contents).map(|_| this_path).ok();
@@ -64,8 +63,9 @@ pub fn write_temp_file(base_name: &str, contents: &[u8]) -> Option<PathBuf> {
 /// # fn main() {}
 /// ```
 pub fn future_result<F, A>(f: F) -> Either<A::Future, FutureResult<A::Item, A::Error>>
-    where A: IntoFuture,
-          F: FnOnce() -> Result<A, A::Error>
+where
+    A: IntoFuture,
+    F: FnOnce() -> Result<A, A::Error>,
 {
     match f() {
         Ok(v) => Either::A(v.into_future()),
