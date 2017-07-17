@@ -267,14 +267,17 @@ impl Fetcher {
     /// function only requires the hash part of the store path that is passed as argument,
     /// but it will return a full store path as a result. So you can use this function to
     /// resolve hashes to full store paths as well.
-    pub fn fetch_references(&self, mut path: StorePath) -> BoxFuture<(StorePath, Vec<StorePath>)> {
+    ///
+    /// The references will be `None` if no information about the store path could be found
+    /// (happens if the narinfo wasn't found which means that hydra didn't build this path).
+    pub fn fetch_references(&self, mut path: StorePath) -> BoxFuture<(StorePath, Option<Vec<StorePath>>)> {
         let url = format!("{}/{}.narinfo", self.cache_url, path.hash());
 
         let parse_response = move |(url, data)| {
             let url: String = url;
             let data: Vec<u8> = match data {
                 Some(v) => v,
-                None => return Ok((path, vec![])),
+                None => return Ok((path, None)),
             };
             let references = b"References:";
             let store_path = b"StorePath:";
@@ -313,7 +316,7 @@ impl Fetcher {
                 }
             }
 
-            Ok((path, result))
+            Ok((path, Some(result)))
         };
 
         Box::new(self.fetch(url, None).and_then(parse_response))
