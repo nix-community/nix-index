@@ -108,6 +108,7 @@ pub struct Fetcher {
 }
 
 const RESPONSE_TIMEOUT_MS: u64 = 1000;
+const CONNECT_TIMEOUT_MS: u64 = 10000;
 
 /// A boxed future using this module's error type.
 type BoxFuture<'a, I> = Box<Future<Item = I, Error = Error> + 'a>;
@@ -257,7 +258,7 @@ impl Fetcher {
                 qitem(Encoding::Gzip),
                 qitem(Encoding::Deflate),
             ]));
-            self.timer.timeout(self.client.request(request).from_err(), Duration::from_millis(RESPONSE_TIMEOUT_MS))
+            self.timer.timeout(self.client.request(request).from_err(), Duration::from_millis(CONNECT_TIMEOUT_MS))
         };
 
         Box::new(future::result(uri).and_then(make_request).and_then(
