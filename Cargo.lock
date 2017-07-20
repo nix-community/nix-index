@@ -27,7 +27,7 @@ dependencies = [
  "tokio-timer 0.1.2 (registry+https://github.com/rust-lang/crates.io-index)",
  "void 1.0.2 (registry+https://github.com/rust-lang/crates.io-index)",
  "xdg 2.1.0 (registry+https://github.com/rust-lang/crates.io-index)",
- "xml-rs 0.4.1 (registry+https://github.com/rust-lang/crates.io-index)",
+ "xml-rs 0.6.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "xz2 0.1.3 (registry+https://github.com/rust-lang/crates.io-index)",
  "zstd 0.4.13 (registry+https://github.com/rust-lang/crates.io-index)",
 ]
@@ -96,11 +96,6 @@ dependencies = [
  "num-traits 0.1.40 (registry+https://github.com/rust-lang/crates.io-index)",
  "serde 1.0.10 (registry+https://github.com/rust-lang/crates.io-index)",
 ]
-
-[[package]]
-name = "bitflags"
-version = "0.7.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
 
 [[package]]
 name = "bitflags"
@@ -736,10 +731,10 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 
 [[package]]
 name = "xml-rs"
-version = "0.4.1"
+version = "0.6.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 dependencies = [
- "bitflags 0.7.0 (registry+https://github.com/rust-lang/crates.io-index)",
+ "bitflags 0.9.1 (registry+https://github.com/rust-lang/crates.io-index)",
 ]
 
 [[package]]
@@ -786,7 +781,6 @@ dependencies = [
 "checksum backtrace-sys 0.1.12 (registry+https://github.com/rust-lang/crates.io-index)" = "afccc5772ba333abccdf60d55200fa3406f8c59dcf54d5f7998c9107d3799c7c"
 "checksum base64 0.6.0 (registry+https://github.com/rust-lang/crates.io-index)" = "96434f987501f0ed4eb336a411e0631ecd1afa11574fe148587adc4ff96143c9"
 "checksum bincode 0.8.0 (registry+https://github.com/rust-lang/crates.io-index)" = "e103c8b299b28a9c6990458b7013dc4a8356a9b854c51b9883241f5866fac36e"
-"checksum bitflags 0.7.0 (registry+https://github.com/rust-lang/crates.io-index)" = "aad18937a628ec6abcd26d1489012cc0e18c21798210f491af69ded9b881106d"
 "checksum bitflags 0.9.1 (registry+https://github.com/rust-lang/crates.io-index)" = "4efd02e230a02e18f92fc2735f44597385ed02ad8f831e7c1c1156ee5e1ab3a5"
 "checksum brotli-sys 0.3.0 (registry+https://github.com/rust-lang/crates.io-index)" = "f08f1ec7187669af59bb4acd62f27471f0a2a9f20b3809ab2db210fffe2f6b38"
 "checksum brotli2 0.3.0 (registry+https://github.com/rust-lang/crates.io-index)" = "1e31d102deacace1dfc91b23ca3adb02c15262f7a1db83c8ef9f57a5d51fb678"
@@ -869,7 +863,7 @@ dependencies = [
 "checksum winapi-build 0.1.1 (registry+https://github.com/rust-lang/crates.io-index)" = "2d315eee3b34aca4797b2da6b13ed88266e6d612562a0c46390af8299fc699bc"
 "checksum ws2_32-sys 0.2.1 (registry+https://github.com/rust-lang/crates.io-index)" = "d59cefebd0c892fa2dd6de581e937301d8552cb44489cdff035c6187cb63fa5e"
 "checksum xdg 2.1.0 (registry+https://github.com/rust-lang/crates.io-index)" = "a66b7c2281ebde13cf4391d70d4c7e5946c3c25e72a7b859ca8f677dcd0b0c61"
-"checksum xml-rs 0.4.1 (registry+https://github.com/rust-lang/crates.io-index)" = "b46ee689ba7a669c08a1170c2348d2516c62dc461135c9e86b2f1f476e07be4a"
+"checksum xml-rs 0.6.0 (registry+https://github.com/rust-lang/crates.io-index)" = "768c90d35b804112a0a9eedb6033c4de2a23942c11e163bc7e63db88738e140e"
 "checksum xz2 0.1.3 (registry+https://github.com/rust-lang/crates.io-index)" = "e9510bdf100731599107c61f77daf46713a69a568f75458999c1f9dbf6ba25b0"
 "checksum zstd 0.4.13 (registry+https://github.com/rust-lang/crates.io-index)" = "a4c99087c4493a2158515e1851193fd3b93e4e5f550b901f9f33bf271047ee65"
 "checksum zstd-safe 1.3.1 (registry+https://github.com/rust-lang/crates.io-index)" = "94f2dab793b7a48bf500eeb1675ca402eb7e883d61526f24968cae936fae40ba"
