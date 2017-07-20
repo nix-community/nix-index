@@ -23,9 +23,9 @@ use hyper::client::{Client, Response, HttpConnector, Request};
 use hyper::{self, Uri, StatusCode, Method};
 use hyper::header::{AcceptEncoding, ContentEncoding, Encoding, Headers, qitem};
 use brotli2::write::BrotliDecoder;
-use tokio_timer::{self, Timer, TimeoutError, TimerError};
-use tokio_retry::strategies::ExponentialBackoff;
-use tokio_retry::{RetryError, RetryStrategy};
+use tokio_timer::{self, Timer, TimeoutError};
+use tokio_retry::{self, Retry};
+use tokio_retry::strategy::ExponentialBackoff;
 use tokio_core::reactor::Handle;
 
 use files::FileTree;
@@ -64,10 +64,12 @@ error_chain! {
         Timeout {
             description("timeout exceeded")
         }
+        TimerError {
+            description("the timer for retries failed")
+        }
     }
     foreign_links {
         Hyper(hyper::Error);
-        Timer(TimerError);
     }
 }
 
@@ -75,17 +77,17 @@ impl<T> From<TimeoutError<T>> for Error {
     fn from(err: TimeoutError<T>) -> Error {
         use self::TimeoutError::*;
         match err {
-            Timer(_, e) => Error::from(e),
+            Timer(_, e) => Error::with_chain(e, ErrorKind::TimerError),
             TimedOut(_) => Error::from(ErrorKind::Timeout),
         }
     }
 }
 
-impl From<RetryError<Error, TimerError>> for Error {
-    fn from(err: RetryError<Error, TimerError>) -> Error {
-        use self::RetryError::*;
+impl From<tokio_retry::Error<Error>> for Error {
+    fn from(err: tokio_retry::Error<Error>) -> Error {
+        use tokio_retry::Error::*;
         match err {
-            TimerError(e) => Error::from(e),
+            TimerError(e) => Error::with_chain(e, ErrorKind::TimerError),
             OperationError(e) => e,
         }
     }
@@ -102,6 +104,7 @@ pub struct Fetcher {
     client: Client<HttpConnector>,
     timer: Timer,
     cache_url: String,
+    handle: Handle,
 }
 
 const RESPONSE_TIMEOUT_MS: u64 = 1000;
@@ -122,6 +125,7 @@ impl Fetcher {
             client: client,
             timer: timer,
             cache_url: cache_url,
+            handle: handle,
         }
     }
 
@@ -142,14 +146,14 @@ impl Fetcher {
         encoding: Option<SupportedEncoding>,
     ) -> BoxFuture<(String, Option<Vec<u8>>)> {
         let strategy = ExponentialBackoff::from_millis(50)
-            .limit_delay(Duration::from_millis(5000))
-            .limit_retries(20);
+            .max_delay(Duration::from_millis(5000))
+            .take(20)
+             // wait at least 5 seconds, as that is the time that cache.nixos.org caches 500 internal server errors
+            .map(|x| x + Duration::from_secs(5));
         Box::new(
-            strategy
-                .run(self.timer.clone(), move || {
-                    self.fetch_noretry(url.clone(), encoding)
-                })
-                .from_err(),
+            Retry::spawn(self.handle.clone(), strategy, move || {
+                self.fetch_noretry(url.clone(), encoding)
+            }).from_err(),
         )
     }
 
