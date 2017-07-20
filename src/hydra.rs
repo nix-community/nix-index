@@ -65,7 +65,7 @@ error_chain! {
             description("timeout exceeded")
         }
         TimerError {
-            description("the timer for retries failed")
+            description("timer failure")
         }
     }
     foreign_links {
@@ -257,7 +257,7 @@ impl Fetcher {
                 qitem(Encoding::Gzip),
                 qitem(Encoding::Deflate),
             ]));
-            self.client.request(request).from_err()
+            self.timer.timeout(self.client.request(request).from_err(), Duration::from_millis(RESPONSE_TIMEOUT_MS))
         };
 
         Box::new(future::result(uri).and_then(make_request).and_then(
