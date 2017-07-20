@@ -17,8 +17,8 @@ use std::time::{Instant, Duration};
 use futures::{Stream, Future};
 use futures::future::{self, Either};
 use xz2::write::XzDecoder;
-use serde::de::{Deserialize, Deserializer, MapVisitor, Visitor};
-use serde::bytes::ByteBuf;
+use serde::de::{Deserialize, Deserializer, MapAccess, Visitor};
+use serde_bytes::ByteBuf;
 use hyper::client::{Client, Response, HttpConnector, Request};
 use hyper::{self, Uri, StatusCode, Method};
 use hyper::header::{AcceptEncoding, ContentEncoding, Encoding, Headers, qitem};
@@ -142,7 +142,7 @@ impl Fetcher {
         encoding: Option<SupportedEncoding>,
     ) -> BoxFuture<(String, Option<Vec<u8>>)> {
         let strategy = ExponentialBackoff::from_millis(50)
-            .limit_delay(Duration::from_millis(500))
+            .limit_delay(Duration::from_millis(5000))
             .limit_retries(20);
         Box::new(
             strategy
@@ -442,21 +442,21 @@ struct HydraFileListing(FileTree);
 /// We cannot use the serde-derive machinery because the `tagged` enum variant does not support map keys
 /// that aren't valid unicode (since it relies on the Deserializer to tell it the type, and the JSON Deserializer
 /// will default to String for map keys).
-impl Deserialize for HydraFileListing {
-    fn deserialize<D: Deserializer>(d: D) -> result::Result<HydraFileListing, D::Error> {
+impl<'de> Deserialize<'de> for HydraFileListing {
+    fn deserialize<D: Deserializer<'de>>(d: D) -> result::Result<HydraFileListing, D::Error> {
         struct Root;
 
-        // The visitor that implements derialization for a file tree
-        impl Visitor for Root {
+        // The access that implements derialization for a file tree
+        impl<'de> Visitor<'de> for Root {
             type Value = FileTree;
 
             fn expecting(&self, f: &mut fmt::Formatter) -> fmt::Result {
                 write!(f, "a file listing (map)")
             }
 
-            fn visit_map<V: MapVisitor>(
+            fn visit_map<V: MapAccess<'de>>(
                 self,
-                mut visitor: V,
+                mut access: V,
             ) -> result::Result<FileTree, V::Error> {
                 const VARIANTS: &'static [&'static str] = &["regular", "directory", "symlink"];
 
@@ -469,42 +469,42 @@ impl Deserialize for HydraFileListing {
                 let mut entries: Option<HashMap<ByteBuf, HydraFileListing>> = None;
                 let mut target: Option<ByteBuf> = None;
 
-                while let Some(key) = try!(visitor.visit_key::<ByteBuf>()) {
+                while let Some(key) = try!(access.next_key::<ByteBuf>()) {
                     match &key as &[u8] {
                         b"type" => {
                             if typ.is_some() {
                                 return Err(serde::de::Error::duplicate_field("type"));
                             }
-                            typ = Some(try!(visitor.visit_value()))
+                            typ = Some(try!(access.next_value()))
                         }
                         b"size" => {
                             if size.is_some() {
                                 return Err(serde::de::Error::duplicate_field("size"));
                             }
-                            size = Some(try!(visitor.visit_value()))
+                            size = Some(try!(access.next_value()))
                         }
                         b"executable" => {
                             if executable.is_some() {
                                 return Err(serde::de::Error::duplicate_field("executable"));
                             }
-                            executable = Some(try!(visitor.visit_value()))
+                            executable = Some(try!(access.next_value()))
                         }
                         b"entries" => {
                             if entries.is_some() {
                                 return Err(serde::de::Error::duplicate_field("entries"));
                             }
-                            entries = Some(try!(visitor.visit_value()))
+                            entries = Some(try!(access.next_value()))
                         }
                         b"target" => {
                             if target.is_some() {
                                 return Err(serde::de::Error::duplicate_field("target"));
                             }
-                            target = Some(try!(visitor.visit_value()))
+                            target = Some(try!(access.next_value()))
                         }
                         _ => {
                             // We ignore all other fields to be more robust against changes in
                             // the format
-                            try!(visitor.visit_value::<serde::de::impls::IgnoredAny>());
+                            try!(access.next_value::<serde::de::IgnoredAny>());
                         }
                     }
                 }

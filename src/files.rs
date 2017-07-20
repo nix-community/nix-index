@@ -3,7 +3,7 @@
 //! The main type here is `FileTree` which represents
 //! such as the file listing for a store path.
 use std::collections::HashMap;
-use serde::bytes::ByteBuf;
+use serde_bytes::ByteBuf;
 use std::str;
 use std::io::{self, Write};
 use memchr::memchr;
