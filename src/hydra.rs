@@ -149,6 +149,8 @@ impl Fetcher {
         let strategy = ExponentialBackoff::from_millis(50)
             .max_delay(Duration::from_millis(5000))
             .take(20)
+             // add some jitter
+            .map(|x| tokio_retry::strategy::jitter(x))
              // wait at least 5 seconds, as that is the time that cache.nixos.org caches 500 internal server errors
             .map(|x| x + Duration::from_secs(5));
         Box::new(
