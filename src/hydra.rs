@@ -270,7 +270,10 @@ impl Fetcher {
     ///
     /// The references will be `None` if no information about the store path could be found
     /// (happens if the narinfo wasn't found which means that hydra didn't build this path).
-    pub fn fetch_references(&self, mut path: StorePath) -> BoxFuture<(StorePath, Option<Vec<StorePath>>)> {
+    pub fn fetch_references(
+        &self,
+        mut path: StorePath,
+    ) -> BoxFuture<(StorePath, Option<Vec<StorePath>>)> {
         let url = format!("{}/{}.narinfo", self.cache_url, path.hash());
 
         let parse_response = move |(url, data)| {

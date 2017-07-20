@@ -116,16 +116,13 @@ fn fetch_file_listings(
                 }
                 Ok((path, missing))
             })
-            .and_then(move |(path, missing)| {
-                if missing {
-                    future::Either::A(future::ok((path, None)))
-                } else {
-                    future::Either::B(
-                        fetcher.fetch_files(&path).then(move |r| {
-                            let files = r.chain_err(|| ErrorKind::FetchFiles(path.clone()))?;
-                            Ok((path, files))
-                        }))
-                }
+            .and_then(move |(path, missing)| if missing {
+                future::Either::A(future::ok((path, None)))
+            } else {
+                future::Either::B(fetcher.fetch_files(&path).then(move |r| {
+                    let files = r.chain_err(|| ErrorKind::FetchFiles(path.clone()))?;
+                    Ok((path, files))
+                }))
             })
     };
 
