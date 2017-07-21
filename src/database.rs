@@ -153,15 +153,66 @@ impl Reader {
         })
     }
 
-    /// Finds all entries in the database that have a filename matching the given pattern.
+    /// Builds a query to find all entries in the database that have a filename matching the given pattern.
     ///
-    /// Note: Since the reader consumes its input, you should probably only call this function once
-    /// as the first call will consume the input thus any further calls will return no results.
+    /// Afterwards, use `Query::into_iter` to iterate over the items.
+    pub fn query(self, exact_regex: &Regex) -> Query {
+        Query {
+            reader: self,
+            exact_regex: exact_regex,
+            hash: None,
+            package_pattern: None,
+        }
+    }
+
+    /// Dumps the contents of the database to stdout, for debugging.
+    #[cfg_attr(feature = "cargo-clippy", allow(print_stdout))]
+    pub fn dump(&mut self) -> Result<()> {
+        loop {
+            let block = self.decoder.decode()?;
+            if block.is_empty() {
+                break;
+            }
+            for line in block.split(|c| *c == b'\n') {
+                println!("{:?}", String::from_utf8_lossy(line));
+            }
+            println!("-- block boundary");
+        }
+        Ok(())
+    }
+}
+
+/// A builder for a `ReaderIter` to iterate over entries in the database matching a given pattern.
+pub struct Query<'a, 'b> {
+    /// The underlying reader from which we read input.
+    reader: Reader,
+
+    /// The pattern that file paths have to match.
+    exact_regex: &'a Regex,
+
+    /// Only include the package with the given hash.
+    hash: Option<String>,
+
+    /// Only include packages whose name matches the given pattern.
+    package_pattern: Option<&'b Regex>,
+}
+
+impl<'a, 'b> Query<'a, 'b> {
+    /// Limit results to entries from the package with the specified hash if `Some`.
+    pub fn hash(self, hash: Option<String>) -> Query<'a, 'b> {
+        Query { hash: hash, ..self }
+    }
+
+    /// Limit results to entries from packages whose name matches the given regex if `Some`.
+    pub fn package_pattern(self, package_pattern: Option<&'b Regex>) -> Query<'a, 'b> {
+        Query { package_pattern: package_pattern, ..self }
+    }
+
+    /// Runs the query, returning an Iterator that will yield all entries matching the conditions.
     ///
-    /// This returns an `Iterator` over the matches found. There is no guarantee about the order
-    /// the matches are returned in.
-    pub fn find_iter<'a, 'b>(&'a mut self, exact_regex: &'b Regex) -> Result<ReaderIter<'a, 'b>> {
-        let mut expr = Expr::parse(exact_regex.as_str()).expect("regex cannot be invalid");
+    /// There is no guarantee about the order of the returned matches.
+    pub fn run(self) -> Result<ReaderIter<'a, 'b>> {
+        let mut expr = Expr::parse(self.exact_regex.as_str()).expect("regex cannot be invalid");
         // replace the ^ anchor by a NUL byte, since each entry is of the form `METADATA\0PATH`
         // (so the NUL byte marks the start of the path).
         {
@@ -182,38 +233,24 @@ impl Reader {
                 }
             }
         }
-        let pattern = GrepBuilder::new(&format!("{}", expr)).build()?;
+        let grep = GrepBuilder::new(&format!("{}", expr)).build()?;
         Ok(ReaderIter {
-            reader: self,
+            reader: self.reader,
             found: Vec::new(),
             found_without_package: Vec::new(),
-            pattern: pattern,
-            exact_pattern: exact_regex,
+            pattern: grep,
+            exact_pattern: self.exact_regex,
             package_entry_pattern: GrepBuilder::new("^p\0").build().expect("valid regex"),
+            package_name_pattern: self.package_pattern,
+            package_hash: self.hash,
         })
-    }
-
-    /// Dumps the contents of the database to stdout, for debugging.
-    #[cfg_attr(feature = "cargo-clippy", allow(print_stdout))]
-    pub fn dump(&mut self) -> Result<()> {
-        loop {
-            let block = self.decoder.decode()?;
-            if block.is_empty() {
-                break;
-            }
-            for line in block.split(|c| *c == b'\n') {
-                println!("{:?}", String::from_utf8_lossy(line));
-            }
-            println!("-- block boundary");
-        }
-        Ok(())
     }
 }
 
 /// An iterator for entries in a database matching a given pattern.
 pub struct ReaderIter<'a, 'b> {
     /// The underlying reader from which we read input.
-    reader: &'a mut Reader,
+    reader: Reader,
     /// Entries that matched the pattern but have not been returned by `next` yet.
     found: Vec<(StorePath, FileTreeEntry)>,
     /// Entries that matched the pattern but for which we don't know yet what package they belong to.
@@ -232,19 +269,26 @@ pub struct ReaderIter<'a, 'b> {
     pattern: Grep,
     /// The raw pattern, as supplied to `find_iter`. This is used to verify matches, since `pattern` itself
     /// may produce false positives.
-    exact_pattern: &'b Regex,
+    exact_pattern: &'a Regex,
     /// Pattern that matches only package entries.
     package_entry_pattern: Grep,
+    /// Pattern that the package name should match.
+    package_name_pattern: Option<&'b Regex>,
+    /// Only search the package with the given hash.
+    package_hash: Option<String>,
 }
 
 impl<'a, 'b> ReaderIter<'a, 'b> {
     /// Reads input until `self.found` contains at least one entry or the end of the input has been reached.
+    #[allow(unused_assignments)] // because of https://github.com/rust-lang/rust/issues/22630
     fn fill_buf(&mut self) -> Result<()> {
         // the input is processed in blocks until we've found at least a single entry
         while self.found.is_empty() {
             let &mut ReaderIter {
                 ref mut reader,
                 ref package_entry_pattern,
+                ref package_name_pattern,
+                ref package_hash,
                 ..
             } = self;
             let block = reader.decoder.decode()?;
@@ -266,7 +310,7 @@ impl<'a, 'b> ReaderIter<'a, 'b> {
             let mut find_package = |item_end| -> Result<_> {
                 if let Some((ref pkg, end)) = cached_package {
                     if item_end < end {
-                        return Ok(Some(pkg.clone()));
+                        return Ok(Some((pkg.clone(), end)));
                     }
                 }
 
@@ -281,24 +325,50 @@ impl<'a, 'b> ReaderIter<'a, 'b> {
                     ErrorKind::StorePathParse(json.to_vec())
                 })?;
                 cached_package = Some((pkg.clone(), mat.end()));
-                Ok(Some(pkg))
+                Ok(Some((pkg, mat.end())))
             };
 
+            // Tests if a store path matches the `package_name_pattern` and `package_hash` constraints.
+            let should_search_package = |pkg: &StorePath| -> bool {
+                package_name_pattern.map_or(true, |r| r.is_match(pkg.name().as_bytes()))
+                    && package_hash.as_ref().map_or(true, |h| h == &pkg.hash())
+            };
+
+            let mut pos = 0;
             // if there are any entries without a package left over from the previous iteration, see
             // if this block contains the package entry.
             if !self.found_without_package.is_empty() {
-                if let Some(pkg) = find_package(0)? {
-                    for entry in self.found_without_package.split_off(0) {
-                        self.found.push((pkg.clone(), entry));
+                if let Some((pkg, end)) = find_package(0)? {
+                    if !should_search_package(&pkg) {
+                        // all entries before end will have the same package
+                        pos = end;
+                        self.found_without_package.split_off(0);
+                    } else {
+                        for entry in self.found_without_package.split_off(0) {
+                            self.found.push((pkg.clone(), entry));
+                        }
                     }
                 }
             }
 
             // process all matches in this block
-            for mat in self.pattern.iter(block) {
+            let mut mat = Match::new();
+            while self.pattern.read_match(&mut mat, block, pos) {
+                pos = mat.end();
                 let entry = &block[mat.start()..mat.end() - 1];
+                // skip entries that aren't describing file paths
                 if self.package_entry_pattern.regex().is_match(entry) {
                     continue;
+                }
+
+                // skip if package name or hash doesn't match
+                // we can only skip if we know the package
+                if let Some((pkg, end)) = find_package(mat.end())? {
+                    if !should_search_package(&pkg) {
+                        // all entries before end will have the same package
+                        pos = end;
+                        continue
+                    }
                 }
 
                 let entry = FileTreeEntry::decode(entry).ok_or_else(|| {
@@ -312,7 +382,7 @@ impl<'a, 'b> ReaderIter<'a, 'b> {
 
                 match find_package(mat.end())? {
                     None => self.found_without_package.push(entry),
-                    Some(pkg) => self.found.push((pkg, entry)),
+                    Some((pkg, _)) => self.found.push((pkg, entry)),
                 }
             }
         }

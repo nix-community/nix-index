@@ -68,11 +68,14 @@ fn locate(args: &Args) -> Result<()> {
 
     // Open the database
     let index_file = args.database.join("files");
-    let mut db = database::Reader::open(&index_file).chain_err(|| {
+    let db = database::Reader::open(&index_file).chain_err(|| {
         ErrorKind::ReadDatabase(index_file.clone())
     })?;
 
-    let results = db.find_iter(&pattern)
+    let results = db.query(&pattern)
+        .package_pattern(package_pattern.as_ref())
+        .hash(args.hash.clone())
+        .run()
         .chain_err(|| ErrorKind::Grep(args.pattern.clone()))?
         .filter(|v| {
             v.as_ref().ok().map_or(true, |v| {
@@ -82,10 +85,6 @@ fn locate(args: &Args) -> Result<()> {
                 let conditions = [
                     !args.group || !path[m.end()..].contains(&b'/'),
                     !args.only_toplevel || (*store_path.origin()).toplevel,
-                    args.hash.as_ref().map_or(true, |h| h == &store_path.hash()),
-                    package_pattern.as_ref().map_or(true, |r| {
-                        r.is_match(store_path.name().as_bytes())
-                    }),
                     args.file_type.iter().any(|t| &node.get_type() == t),
                 ];
 
