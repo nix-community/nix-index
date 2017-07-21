@@ -77,10 +77,7 @@ fn locate(args: &Args) -> Result<()> {
         .filter(|v| {
             v.as_ref().ok().map_or(true, |v| {
                 let &(ref store_path, FileTreeEntry { ref path, ref node }) = v;
-                let m = match pattern.find_iter(path).last() {
-                    Some(m) => m,
-                    None => return false,
-                };
+                let m = pattern.find_iter(path).last().expect("path should match the pattern");
 
                 let conditions = [
                     !args.group || !path[m.end()..].contains(&b'/'),
