@@ -17,6 +17,7 @@ use std::path::PathBuf;
 use std::result;
 use std::process;
 use std::str;
+use std::collections::{HashSet};
 use separator::Separatable;
 use clap::{Arg, App, ArgMatches};
 use regex::bytes::Regex;
@@ -95,6 +96,7 @@ fn locate(args: &Args) -> Result<()> {
             })
         });
 
+    let mut printed_attrs = HashSet::new();
     for v in results {
         let (store_path, FileTreeEntry { path, node }) =
             v.chain_err(|| ErrorKind::ReadDatabase(index_file.clone()))?;
@@ -117,7 +119,10 @@ fn locate(args: &Args) -> Result<()> {
         }
 
         if args.minimal {
-            println!("{}", attr);
+            // only print each package once, even if there are multiple matches
+            if printed_attrs.insert(attr.clone()) {
+                println!("{}", attr);
+            }
         } else {
             print!(
                 "{:<40} {:>14} {:>1} {}",
