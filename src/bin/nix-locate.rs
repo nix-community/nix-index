@@ -136,7 +136,7 @@ fn locate(args: &Args) -> Result<()> {
                 for mat in pattern.find_iter(path.as_bytes()) {
                     // if the match is empty, we need to make sure we don't use string
                     // indexing because the match may be "inside" a single multibyte character
-                    // in that case
+                    // in that case (for example, the pattern may match the second byte of a multibyte character)
                     if mat.start() == mat.end() {
                         continue;
                     }
