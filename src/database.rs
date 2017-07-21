@@ -227,7 +227,7 @@ pub struct ReaderIter<'a, 'b> {
     /// This pattern should work on the raw bytes of file entries. In particular, the file path is not the
     /// first data in a file entry, so the regex `^` anchor will not work correctly.
     ///
-    /// It pattern here may produce false positives (for example, if it matches inside the metadata of a file
+    /// The pattern here may produce false positives (for example, if it matches inside the metadata of a file
     /// entry). This is not a problem, as matches are later checked against `exact_pattern`.
     pattern: Grep,
     /// The raw pattern, as supplied to `find_iter`. This is used to verify matches, since `pattern` itself
