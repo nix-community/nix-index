@@ -17,7 +17,7 @@ use std::path::PathBuf;
 use std::result;
 use std::process;
 use std::str;
-use std::collections::{HashSet};
+use std::collections::HashSet;
 use separator::Separatable;
 use clap::{Arg, App, ArgMatches};
 use regex::bytes::Regex;
@@ -30,11 +30,13 @@ error_chain! {
     errors {
         ReadDatabase(database: PathBuf) {
             description("database read error")
-            display("reading from the database at '{}' failed", database.to_string_lossy())
+            display("reading from the database at '{}' failed.\n\
+                     This may be caused by a corrupt or missing database, try (re)running `nix-index`` to generate the database. \n\
+                     If the error persists please file a bug report at https://github.com/bennofs/nix-index.", database.to_string_lossy())
         }
         Grep(pattern: String) {
             description("grep builder error")
-            display("constructing the regular expression from the pattern '{}' failed", pattern)
+            display("constructing the regular expression from the pattern '{}' failed.", pattern)
         }
     }
 }
@@ -80,7 +82,9 @@ fn locate(args: &Args) -> Result<()> {
         .filter(|v| {
             v.as_ref().ok().map_or(true, |v| {
                 let &(ref store_path, FileTreeEntry { ref path, ref node }) = v;
-                let m = pattern.find_iter(path).last().expect("path should match the pattern");
+                let m = pattern.find_iter(path).last().expect(
+                    "path should match the pattern",
+                );
 
                 let conditions = [
                     !args.group || !path[m.end()..].contains(&b'/'),

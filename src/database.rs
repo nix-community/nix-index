@@ -205,7 +205,10 @@ impl<'a, 'b> Query<'a, 'b> {
 
     /// Limit results to entries from packages whose name matches the given regex if `Some`.
     pub fn package_pattern(self, package_pattern: Option<&'b Regex>) -> Query<'a, 'b> {
-        Query { package_pattern: package_pattern, ..self }
+        Query {
+            package_pattern: package_pattern,
+            ..self
+        }
     }
 
     /// Runs the query, returning an Iterator that will yield all entries matching the conditions.
@@ -330,8 +333,8 @@ impl<'a, 'b> ReaderIter<'a, 'b> {
 
             // Tests if a store path matches the `package_name_pattern` and `package_hash` constraints.
             let should_search_package = |pkg: &StorePath| -> bool {
-                package_name_pattern.map_or(true, |r| r.is_match(pkg.name().as_bytes()))
-                    && package_hash.as_ref().map_or(true, |h| h == &pkg.hash())
+                package_name_pattern.map_or(true, |r| r.is_match(pkg.name().as_bytes())) &&
+                    package_hash.as_ref().map_or(true, |h| h == &pkg.hash())
             };
 
             let mut pos = 0;
@@ -367,7 +370,7 @@ impl<'a, 'b> ReaderIter<'a, 'b> {
                     if !should_search_package(&pkg) {
                         // all entries before end will have the same package
                         pos = end;
-                        continue
+                        continue;
                     }
                 }
 

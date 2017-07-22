@@ -260,7 +260,10 @@ impl Fetcher {
                 qitem(Encoding::Gzip),
                 qitem(Encoding::Deflate),
             ]));
-            self.timer.timeout(self.client.request(request).from_err(), Duration::from_millis(CONNECT_TIMEOUT_MS))
+            self.timer.timeout(
+                self.client.request(request).from_err(),
+                Duration::from_millis(CONNECT_TIMEOUT_MS),
+            )
         };
 
         Box::new(future::result(uri).and_then(make_request).and_then(
