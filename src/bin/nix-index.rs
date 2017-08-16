@@ -62,7 +62,7 @@ error_chain! {
         }
         WritePathsCache {
             description("paths.cache write error")
-                display("writing the paths.cache file failed")
+            display("writing the paths.cache file failed")
         }
         CreateDatabase(path: PathBuf) {
             description("crate database error")
@@ -70,7 +70,7 @@ error_chain! {
         }
         CreateDatabaseDir(path: PathBuf) {
             description("crate database directory error")
-                display("creating the directory for the database at '{}' failed", path.to_string_lossy())
+            display("creating the directory for the database at '{}' failed", path.to_string_lossy())
         }
         WriteDatabase(path: PathBuf) {
             description("database write error")
