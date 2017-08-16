@@ -5,7 +5,6 @@
 //! a store path and `fetch_references` to retrieve the references from the narinfo.
 use serde;
 use serde_json;
-use super::util;
 
 use std::fmt;
 use std::result;
@@ -28,6 +27,7 @@ use tokio_retry::{self, Retry};
 use tokio_retry::strategy::ExponentialBackoff;
 use tokio_core::reactor::Handle;
 
+use util;
 use files::FileTree;
 use package::{StorePath, PathOrigin};
 
