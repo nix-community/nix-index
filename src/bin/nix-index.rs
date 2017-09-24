@@ -168,6 +168,7 @@ struct Args {
     nixpkgs: String,
     compression_level: i32,
     path_cache: bool,
+    show_trace: bool,
 }
 
 /// The main function of this module: creates a new nix-index database.
@@ -185,7 +186,7 @@ fn update_index(args: &Args, lp: &mut Core) -> Result<()> {
         }
 
         // These are the paths that show up in `nix-env -qa`.
-        let normal_paths = nixpkgs::query_packages(&args.nixpkgs, None);
+        let normal_paths = nixpkgs::query_packages(&args.nixpkgs, None, args.show_trace);
 
         // We also add some additional sets that only show up in `nix-env -qa -A someSet`.
         //
@@ -205,7 +206,7 @@ fn update_index(args: &Args, lp: &mut Core) -> Result<()> {
         ];
 
         let all_paths = normal_paths.chain(extra_scopes.into_iter().flat_map(|scope| {
-            nixpkgs::query_packages(&args.nixpkgs, Some(scope))
+            nixpkgs::query_packages(&args.nixpkgs, Some(scope), args.show_trace)
         }));
 
         let paths: Vec<StorePath> = all_paths
@@ -285,6 +286,7 @@ fn process_args(matches: &ArgMatches) -> result::Result<Args, clap::Error> {
             .to_string(),
         compression_level: value_t!(matches.value_of("level"), i32)?,
         path_cache: matches.is_present("path-cache"),
+        show_trace: matches.is_present("show-trace"),
     };
 
     Ok(args)
@@ -322,6 +324,10 @@ fn main() {
              .long("compression")
              .help("Zstandard compression level")
              .default_value("22"))
+        .arg(Arg::with_name("show-trace")
+             .long("show-trace")
+             .help("Show a stack trace in case of Nix expression evaluation errors")
+        )
         .arg(Arg::with_name("path-cache")
              .long("path-cache")
              .hidden(true)

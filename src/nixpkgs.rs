@@ -22,7 +22,7 @@ use package::{PathOrigin, StorePath};
 /// of `attr` are returned.
 ///
 /// The function returns an Iterator over the packages returned by nix-env.
-pub fn query_packages(nixpkgs: &str, scope: Option<&str>) -> PackagesQuery<ChildStdout> {
+pub fn query_packages(nixpkgs: &str, scope: Option<&str>, show_trace: bool) -> PackagesQuery<ChildStdout> {
     let mut cmd = Command::new("nix-env");
     cmd.arg("-qaP")
         .arg("--out-path")
@@ -38,6 +38,10 @@ pub fn query_packages(nixpkgs: &str, scope: Option<&str>) -> PackagesQuery<Child
 
     if let Some(scope) = scope {
         cmd.arg("-A").arg(scope);
+    }
+
+    if show_trace {
+        cmd.arg("--show-trace");
     }
 
     PackagesQuery {

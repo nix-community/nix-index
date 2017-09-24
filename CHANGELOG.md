@@ -1,5 +1,6 @@
 ## [Unreleased]
 ### Added
+* `--show-trace` command line option
 ### Fixed
 ### Changed
 ### Removed
