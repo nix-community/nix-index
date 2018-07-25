@@ -1,7 +1,7 @@
 [package]
 authors = ["Benno Fünfstück <benno.fuenfstueck@gmail.com>"]
 name = "nix-index"
-version = "0.1.0"
+version = "0.1.1"
 
 [[bin]]
 doc = false
