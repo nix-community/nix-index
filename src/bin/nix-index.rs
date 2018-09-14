@@ -107,22 +107,21 @@ fn fetch_file_listings(
     let process = move |mut handle: WorkSetHandle<_, _>, path: StorePath| {
         fetcher
             .fetch_references(path.clone())
-            .then(move |e| {
-                let (path, references) = e.chain_err(|| ErrorKind::FetchReferences(path))?;
-                let missing = references.is_none();
-                for reference in references.unwrap_or_else(|| vec![]) {
-                    let hash = reference.hash().into_owned();
-                    handle.add_work(hash, reference);
+            .map_err(|e| Error::with_chain(e, ErrorKind::FetchReferences(path)))
+            .and_then(move |(path, references)| {
+                match references {
+                    Some(references) => {
+                        for reference in references {
+                            let hash = reference.hash().into_owned();
+                            handle.add_work(hash, reference);
+                        }
+                        future::Either::B(fetcher.fetch_files(&path).then(move |r| {
+                            let files = r.chain_err(|| ErrorKind::FetchFiles(path.clone()))?;
+                            Ok((path, files))
+                        }))
+                    },
+                    None => future::Either::A(future::ok((path, None))),
                 }
-                Ok((path, missing))
-            })
-            .and_then(move |(path, missing)| if missing {
-                future::Either::A(future::ok((path, None)))
-            } else {
-                future::Either::B(fetcher.fetch_files(&path).then(move |r| {
-                    let files = r.chain_err(|| ErrorKind::FetchFiles(path.clone()))?;
-                    Ok((path, files))
-                }))
             })
     };
 
