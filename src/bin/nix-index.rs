@@ -219,23 +219,22 @@ fn update_index(args: &Args, lp: &mut Core) -> Result<()> {
     };
     let (requests, watch) = query()?;
 
-    // Add progress output and filter packages with no file listings available
+    // Add progress output
     let (mut indexed, mut missing) = (0, 0);
-    let requests = requests.filter_map(move |entry| {
-        let r = if let Some((path, files)) = entry {
+    let requests = requests.inspect(|entry| {
+        if entry.is_some() {
             indexed += 1;
-            Some((path, files))
         } else {
             missing += 1;
-            None
         };
 
         errst!("+ generating index: {:05} paths found :: {:05} paths not in binary cache :: {:05} paths in queue \r",
                indexed, missing, watch.queue_len());
         io::stderr().flush().expect("flushing stderr failed");
-
-        r
     });
+
+    // Filter packages with no file listings available
+    let requests = requests.filter_map(|entry| entry);
 
     errst!("+ generating index\r");
     fs::create_dir_all(&args.database).chain_err(|| {
