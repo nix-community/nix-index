@@ -16,6 +16,7 @@ extern crate error_chain;
 #[macro_use]
 extern crate stderr;
 
+use error_chain::ChainedError;
 use futures::future;
 use futures::{Future, Stream};
 use std::result;
@@ -218,6 +219,12 @@ fn update_index(args: &Args, lp: &mut Core) -> Result<()> {
         Ok(fetch_file_listings(&fetcher, args.jobs, paths.clone()))
     };
     let (requests, watch) = query()?;
+
+    // Treat request errors as if the file list were missing
+    let requests = requests.or_else(|e| {
+        errst!("\n{}", e.display_chain());
+        Ok(None)
+    });
 
     // Add progress output
     let (mut indexed, mut missing) = (0, 0);
