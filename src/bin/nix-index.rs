@@ -116,8 +116,10 @@ fn fetch_file_listings(
                             handle.add_work(hash, reference);
                         }
                         future::Either::B(fetcher.fetch_files(&path).then(move |r| {
-                            let files = r.chain_err(|| ErrorKind::FetchFiles(path.clone()))?;
-                            Ok((path, files))
+                            match r {
+                                Err(e) => Err(Error::with_chain(e, ErrorKind::FetchFiles(path))),
+                                Ok(files) => Ok((path, files)),
+                            }
                         }))
                     },
                     None => future::Either::A(future::ok((path, None))),
