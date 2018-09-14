@@ -83,7 +83,7 @@ error_chain! {
 ///
 /// If a store path has no file listing (for example, because it is not built by hydra),
 /// the file listing will be `None` instead.
-type FileListingStream<'a> = Box<Stream<Item = (StorePath, Option<FileTree>), Error = Error> + 'a>;
+type FileListingStream<'a> = Box<Stream<Item = Option<(StorePath, FileTree)>, Error = Error> + 'a>;
 
 /// Fetches all the file listings for the full closure of the given starting set of path.
 ///
@@ -118,11 +118,12 @@ fn fetch_file_listings(
                         future::Either::B(fetcher.fetch_files(&path).then(move |r| {
                             match r {
                                 Err(e) => Err(Error::with_chain(e, ErrorKind::FetchFiles(path))),
-                                Ok(files) => Ok((path, files)),
+                                Ok(Some(files)) => Ok(Some((path, files))),
+                                Ok(None) => Ok(None),
                             }
                         }))
                     },
-                    None => future::Either::A(future::ok((path, None))),
+                    None => future::Either::A(future::ok(None)),
                 }
             })
     };
@@ -151,7 +152,7 @@ fn try_load_paths_cache() -> Result<Option<(FileListingStream<'static>, WorkSetW
         bincode::deserialize_from(&mut input, bincode::Infinite)
             .chain_err(|| ErrorKind::LoadPathsCache)?;
     let workset = WorkSet::from_iter(fetched.into_iter().map(|(path, tree)| {
-        (path.hash().to_string(), (path, Some(tree)))
+        (path.hash().to_string(), Some((path, tree)))
     }));
     let watch = workset.watch();
     let stream = workset.then(|r| {
@@ -221,9 +222,7 @@ fn update_index(args: &Args, lp: &mut Core) -> Result<()> {
     // Add progress output and filter packages with no file listings available
     let (mut indexed, mut missing) = (0, 0);
     let requests = requests.filter_map(move |entry| {
-        let (path, files) = entry;
-
-        let r = if let Some(files) = files {
+        let r = if let Some((path, files)) = entry {
             indexed += 1;
             Some((path, files))
         } else {
