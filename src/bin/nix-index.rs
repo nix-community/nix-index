@@ -16,6 +16,7 @@ extern crate error_chain;
 #[macro_use]
 extern crate stderr;
 
+use error_chain::ChainedError;
 use futures::future;
 use futures::{Future, Stream};
 use std::result;
@@ -83,7 +84,7 @@ error_chain! {
 ///
 /// If a store path has no file listing (for example, because it is not built by hydra),
 /// the file listing will be `None` instead.
-type FileListingStream<'a> = Box<Stream<Item = (StorePath, Option<FileTree>), Error = Error> + 'a>;
+type FileListingStream<'a> = Box<Stream<Item = Option<(StorePath, FileTree)>, Error = Error> + 'a>;
 
 /// Fetches all the file listings for the full closure of the given starting set of path.
 ///
@@ -107,22 +108,24 @@ fn fetch_file_listings(
     let process = move |mut handle: WorkSetHandle<_, _>, path: StorePath| {
         fetcher
             .fetch_references(path.clone())
-            .then(move |e| {
-                let (path, references) = e.chain_err(|| ErrorKind::FetchReferences(path))?;
-                let missing = references.is_none();
-                for reference in references.unwrap_or_else(|| vec![]) {
-                    let hash = reference.hash().into_owned();
-                    handle.add_work(hash, reference);
+            .map_err(|e| Error::with_chain(e, ErrorKind::FetchReferences(path)))
+            .and_then(move |(path, references)| {
+                match references {
+                    Some(references) => {
+                        for reference in references {
+                            let hash = reference.hash().into_owned();
+                            handle.add_work(hash, reference);
+                        }
+                        future::Either::B(fetcher.fetch_files(&path).then(move |r| {
+                            match r {
+                                Err(e) => Err(Error::with_chain(e, ErrorKind::FetchFiles(path))),
+                                Ok(Some(files)) => Ok(Some((path, files))),
+                                Ok(None) => Ok(None),
+                            }
+                        }))
+                    },
+                    None => future::Either::A(future::ok(None)),
                 }
-                Ok((path, missing))
-            })
-            .and_then(move |(path, missing)| if missing {
-                future::Either::A(future::ok((path, None)))
-            } else {
-                future::Either::B(fetcher.fetch_files(&path).then(move |r| {
-                    let files = r.chain_err(|| ErrorKind::FetchFiles(path.clone()))?;
-                    Ok((path, files))
-                }))
             })
     };
 
@@ -150,7 +153,7 @@ fn try_load_paths_cache() -> Result<Option<(FileListingStream<'static>, WorkSetW
         bincode::deserialize_from(&mut input, bincode::Infinite)
             .chain_err(|| ErrorKind::LoadPathsCache)?;
     let workset = WorkSet::from_iter(fetched.into_iter().map(|(path, tree)| {
-        (path.hash().to_string(), (path, Some(tree)))
+        (path.hash().to_string(), Some((path, tree)))
     }));
     let watch = workset.watch();
     let stream = workset.then(|r| {
@@ -217,25 +220,28 @@ fn update_index(args: &Args, lp: &mut Core) -> Result<()> {
     };
     let (requests, watch) = query()?;
 
-    // Add progress output and filter packages with no file listings available
-    let (mut indexed, mut missing) = (0, 0);
-    let requests = requests.filter_map(move |entry| {
-        let (path, files) = entry;
+    // Treat request errors as if the file list were missing
+    let requests = requests.or_else(|e| {
+        errst!("\n{}", e.display_chain());
+        Ok(None)
+    });
 
-        let r = if let Some(files) = files {
+    // Add progress output
+    let (mut indexed, mut missing) = (0, 0);
+    let requests = requests.inspect(|entry| {
+        if entry.is_some() {
             indexed += 1;
-            Some((path, files))
         } else {
             missing += 1;
-            None
         };
 
         errst!("+ generating index: {:05} paths found :: {:05} paths not in binary cache :: {:05} paths in queue \r",
                indexed, missing, watch.queue_len());
         io::stderr().flush().expect("flushing stderr failed");
-
-        r
     });
+
+    // Filter packages with no file listings available
+    let requests = requests.filter_map(|entry| entry);
 
     errst!("+ generating index\r");
     fs::create_dir_all(&args.database).chain_err(|| {
