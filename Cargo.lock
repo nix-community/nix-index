@@ -410,7 +410,7 @@ dependencies = [
  "tokio-timer 0.1.2 (registry+https://github.com/rust-lang/crates.io-index)",
  "void 1.0.2 (registry+https://github.com/rust-lang/crates.io-index)",
  "xdg 2.1.0 (registry+https://github.com/rust-lang/crates.io-index)",
- "xml-rs 0.7.0 (registry+https://github.com/rust-lang/crates.io-index)",
+ "xml-rs 0.8.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "xz2 0.1.4 (registry+https://github.com/rust-lang/crates.io-index)",
  "zstd 0.4.19+zstd.1.3.5 (registry+https://github.com/rust-lang/crates.io-index)",
 ]
@@ -812,11 +812,8 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 
 [[package]]
 name = "xml-rs"
-version = "0.7.0"
+version = "0.8.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-dependencies = [
- "bitflags 1.0.1 (registry+https://github.com/rust-lang/crates.io-index)",
-]
 
 [[package]]
 name = "xz2"
@@ -957,7 +954,7 @@ dependencies = [
 "checksum winapi-x86_64-pc-windows-gnu 0.3.2 (registry+https://github.com/rust-lang/crates.io-index)" = "98f12c52b2630cd05d2c3ffd8e008f7f48252c042b4871c72aed9dc733b96668"
 "checksum ws2_32-sys 0.2.1 (registry+https://github.com/rust-lang/crates.io-index)" = "d59cefebd0c892fa2dd6de581e937301d8552cb44489cdff035c6187cb63fa5e"
 "checksum xdg 2.1.0 (registry+https://github.com/rust-lang/crates.io-index)" = "a66b7c2281ebde13cf4391d70d4c7e5946c3c25e72a7b859ca8f677dcd0b0c61"
-"checksum xml-rs 0.7.0 (registry+https://github.com/rust-lang/crates.io-index)" = "3c1cb601d29fe2c2ac60a2b2e5e293994d87a1f6fa9687a31a15270f909be9c2"
+"checksum xml-rs 0.8.0 (registry+https://github.com/rust-lang/crates.io-index)" = "541b12c998c5b56aa2b4e6f18f03664eef9a4fd0a246a55594efae6cc2d964b5"
 "checksum xz2 0.1.4 (registry+https://github.com/rust-lang/crates.io-index)" = "98df591c3504d014dd791d998123ed00a476c7e26dc6b2e873cb55c6ac9e59fa"
 "checksum zstd 0.4.19+zstd.1.3.5 (registry+https://github.com/rust-lang/crates.io-index)" = "e44f036c43e506ce5651cad4f340af6b0b6d405a1c440e4a553bc422df7a81a2"
 "checksum zstd-safe 1.4.4+zstd.1.3.5 (registry+https://github.com/rust-lang/crates.io-index)" = "9291dbf678d18ace21725e3409d07e0a80d512feb75f5e27ac472a4948e5ddd1"
