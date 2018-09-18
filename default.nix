@@ -9,7 +9,7 @@ with (import nixpkgs {}); with rustPlatform;
 
 buildRustPackage rec {
   name = "nix-index-${version}";
-  version = "0.1.1";
+  version = "0.1.2";
 
   src = builtins.filterSource (name: type: !lib.hasPrefix "target" (baseNameOf name) && !lib.hasPrefix "result" (baseNameOf name) && name != ".git") ./.;
   cargoSha256 = "045qm7cyg3sdvf22i8b9cz8gsvggs5bn9xz8k1pvn5gxb7zj24cx";
