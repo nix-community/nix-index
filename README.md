@@ -1,6 +1,6 @@
 # nix-index [![Build Status](https://travis-ci.org/bennofs/nix-index.svg?branch=master)](https://travis-ci.org/bennofs/nix-index)
 ## A files database for nixpkgs
-**nix-index** is a tool to quickly locate the package providing a certain file in [`nixpkgs`](https://github.com/NixOS/nixpkgs).
+**nix-index** is a tool to quickly locate the package providing a certain file in [`nixpkgs`](https://github.com/NixOS/nixpkgs). It indexes built derivations found in binary caches. 
 
 ###### Demo
 
@@ -23,7 +23,7 @@ $ nix-env -if.
 ```
 
 ## Usage
-First, you need to generate an index by running `nix-index`. Then, you can use `nix-locate pattern`. For more information, see `nix-locate --help` and `nix-index --help`.
+First, you need to generate an index by running `nix-index` (it takes around 5 minutes) . Then, you can use `nix-locate pattern`. For more information, see `nix-locate --help` and `nix-index --help`.
 
 ## Contributing
 If you find any missing features that you would like to implement, I'm very happy about any PRs! You can also create an issue first if the feature is more complex so we can discuss possible implementations.
