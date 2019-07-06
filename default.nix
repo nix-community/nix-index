@@ -1,6 +1,6 @@
 let
-  # nixpkgs-unstable at 2018-08-20 14:43
-  nixpkgsRev = "0828e2d8c369604c56219bd7085256b984087280";
+  # nixpkgs-unstable at 2019-07-06 16:03
+  nixpkgsRev = "df738814d1bed1a554eac1536e99253ab75ba012";
   defaultNixpkgs = builtins.fetchTarball "github.com/NixOS/nixpkgs/archive/${nixpkgsRev}.tar.gz";
 in
 { nixpkgs ? defaultNixpkgs }:
@@ -12,8 +12,8 @@ buildRustPackage rec {
   version = "0.1.2";
 
   src = builtins.filterSource (name: type: !lib.hasPrefix "target" (baseNameOf name) && !lib.hasPrefix "result" (baseNameOf name) && name != ".git") ./.;
-  cargoSha256 = "045qm7cyg3sdvf22i8b9cz8gsvggs5bn9xz8k1pvn5gxb7zj24cx";
   buildInputs = [pkgconfig openssl curl];
+  cargoSha256 = "10cg4wf36hkzp4fbws0f6wk12zkh6gsy92raq4d6kyhp7myp7p3d";
 
   postInstall = ''
     mkdir -p $out/etc/profile.d
