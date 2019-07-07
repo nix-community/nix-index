@@ -14,12 +14,23 @@ linuxPackages_grsec_nixos.dpdk.examples       2,022,224 x /nix/store/2wqv94290pa
 camlistore.out                                7,938,952 x /nix/store/xn5ivjdyslxldhm5cb4x0lfz48zf21rl-camlistore-0.9/bin/hello
 ```
 ## Installation
-To install this tool, simply clone the repo and run `nix-env -if.` to install it into your user environment:
+
+### Latest Git version
+
+To install the latest development version of nix-index, simply clone the repo and run `nix-env -if.`:
 
 ```
 $ git clone https://github.com/bennofs/nix-index
 $ cd nix-index
 $ nix-env -if.
+```
+
+### Stable
+
+For the stable version, you can either [checkout](https://git-scm.com/docs/git-checkout) the latest [tag](https://git-scm.com/docs/git-tag) (see the list [here](https://github.com/bennofs/nix-index/tags)) or use Nixpkgs' repositories' and install it with:
+
+```
+$ nix-env -iA nixos.nix-index
 ```
 
 ## Usage
