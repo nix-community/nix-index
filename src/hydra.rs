@@ -111,7 +111,7 @@ const RESPONSE_TIMEOUT_MS: u64 = 1000;
 const CONNECT_TIMEOUT_MS: u64 = 10000;
 
 /// A boxed future using this module's error type.
-type BoxFuture<'a, I> = Box<Future<Item = I, Error = Error> + 'a>;
+type BoxFuture<'a, I> = Box<dyn Future<Item = I, Error = Error> + 'a>;
 
 impl Fetcher {
     /// Initializes a new instance of the `Fetcher` struct.
@@ -341,7 +341,7 @@ impl Fetcher {
     pub fn fetch_files<'a>(
         &'a self,
         path: &StorePath,
-    ) -> Box<Future<Item = Option<FileTree>, Error = Error> + 'a> {
+    ) -> Box<dyn Future<Item = Option<FileTree>, Error = Error> + 'a> {
         let url_xz = format!("{}/{}.ls.xz", self.cache_url, path.hash());
         let url_generic = format!("{}/{}.ls", self.cache_url, path.hash());
         let name = format!("{}.json", path.hash());

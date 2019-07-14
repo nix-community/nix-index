@@ -138,7 +138,7 @@ pub trait WorkSetObserver {
 ///
 /// The watch not prevent the queue from terminating. If the queue has already
 /// terminated, the number of remaining items will be zero.
-pub type WorkSetWatch = Box<WorkSetObserver>;
+pub type WorkSetWatch = Box<dyn WorkSetObserver>;
 
 /// This is a concrete implementation of a `WorkSetObserver`.
 ///
