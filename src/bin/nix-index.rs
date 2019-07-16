@@ -84,7 +84,7 @@ error_chain! {
 ///
 /// If a store path has no file listing (for example, because it is not built by hydra),
 /// the file listing will be `None` instead.
-type FileListingStream<'a> = Box<Stream<Item = Option<(StorePath, FileTree)>, Error = Error> + 'a>;
+type FileListingStream<'a> = Box<dyn Stream<Item = Option<(StorePath, FileTree)>, Error = Error> + 'a>;
 
 /// Fetches all the file listings for the full closure of the given starting set of path.
 ///
