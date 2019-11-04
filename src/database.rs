@@ -166,7 +166,7 @@ impl Reader {
     }
 
     /// Dumps the contents of the database to stdout, for debugging.
-    #[cfg_attr(feature = "cargo-clippy", allow(print_stdout))]
+    #[allow(clippy::print_stdout)]
     pub fn dump(&mut self) -> Result<()> {
         loop {
             let block = self.decoder.decode()?;
