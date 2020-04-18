@@ -36,6 +36,28 @@ $ nix-env -iA nixos.nix-index
 ## Usage
 First, you need to generate an index by running `nix-index` (it takes around 5 minutes) . Then, you can use `nix-locate pattern`. For more information, see `nix-locate --help` and `nix-index --help`.
 
+### Usage as a command-not-found replacement
+
+Nix-index provides a "command-not-found" script that can print for you the attribute path of unfound commands in your shell. You can either source `${pkgs.nix-index}/etc/command-not-found.sh` in your own shell init files (works for ZSH and Bash for as far as we know) or you can use the following in home-manager / `/etc/nixos/configuration.nix`:
+
+```nix
+    programs.command-not-found.enable = false;
+    programs.bash.interactiveShellInit = ''
+      source ${pkgs.nix-index}/etc/profile.d/command-not-found.sh
+    '';
+```
+
+Replace `bash` with `zsh` if you use `zsh`.
+
+Example output:
+
+```
+$ blender
+The program 'blender' is currently not installed. You can install it
+by typing:
+  nix-env -iA nixpkgs.blender.out
+```
+
 ## Contributing
 If you find any missing features that you would like to implement, I'm very happy about any PRs! You can also create an issue first if the feature is more complex so we can discuss possible implementations.
 
