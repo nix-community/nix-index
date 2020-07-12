@@ -9,7 +9,7 @@ command_not_found_handle () {
 
     # taken from http://www.linuxjournal.com/content/bash-command-not-found
     # - do not run when inside Midnight Commander or within a Pipe
-    if [ -n "$MC_SID" ] || ! [ -t 1 ]; then
+    if [ -n "${MC_SID-}" ] || ! [ -t 1 ]; then
         >&2 echo "$1: command not found"
         return 127
     fi
@@ -38,7 +38,7 @@ command_not_found_handle () {
 
             # these will not return 127 if they worked correctly
 
-            if ! [ -z "$NIX_AUTO_INSTALL" ]; then
+            if ! [ -z "${NIX_AUTO_INSTALL-}" ]; then
                 >&2 cat <<EOF
 The program '$cmd' is currently not installed. It is provided by
 the package '$toplevel.$attrs', which I will now install for you.
@@ -53,7 +53,7 @@ Failed to install $toplevel.attrs.
 $cmd: command not found
 EOF
                 fi
-            elif ! [ -z "$NIX_AUTO_RUN" ]; then
+            elif ! [ -z "${NIX_AUTO_RUN-}" ]; then
                 nix-build --no-out-link -A $attrs "<$toplevel>"
                 if [ "$?" -eq 0 ]; then
                     # how nix-shell handles commands is weird
