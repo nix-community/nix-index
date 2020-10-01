@@ -6,34 +6,34 @@
 use serde;
 use serde_json;
 
-use std::fmt;
-use std::result;
-use std::str::{self, Utf8Error, FromStr};
-use std::collections::HashMap;
-use std::io::{self, Write};
-use std::env::var;
-use std::path::PathBuf;
-use std::time::{Instant, Duration};
-use std::rc::Rc;
-use futures::{Stream, Future};
+use brotli2::write::BrotliDecoder;
 use futures::future::{self, Either};
-use xz2::write::XzDecoder;
+use futures::{Future, Stream};
+use hyper::client::{Client as HyperClient, HttpConnector, Request, Response};
+use hyper::header::{qitem, AcceptEncoding, Basic, ContentEncoding, Encoding, Headers};
+use hyper::{self, Method, StatusCode, Uri};
+use hyper_proxy::{Custom, Intercept, Proxy, ProxyConnector};
 use serde::de::{Deserialize, Deserializer, MapAccess, Visitor};
 use serde_bytes::ByteBuf;
-use hyper::client::{Client as HyperClient, Response, HttpConnector, Request};
-use hyper::{self, Uri, StatusCode, Method};
-use hyper::header::{AcceptEncoding, ContentEncoding, Encoding, Headers, qitem, Basic};
-use hyper_proxy::{ProxyConnector, Intercept, Proxy,Custom};
-use brotli2::write::BrotliDecoder;
-use tokio_timer::{self, Timer, TimeoutError};
-use tokio_retry::{self, Retry};
-use tokio_retry::strategy::ExponentialBackoff;
+use std::collections::HashMap;
+use std::env::var;
+use std::fmt;
+use std::io::{self, Write};
+use std::path::PathBuf;
+use std::rc::Rc;
+use std::result;
+use std::str::{self, FromStr, Utf8Error};
+use std::time::{Duration, Instant};
 use tokio_core::reactor::Handle;
+use tokio_retry::strategy::ExponentialBackoff;
+use tokio_retry::{self, Retry};
+use tokio_timer::{self, TimeoutError, Timer};
 use url::Url;
+use xz2::write::XzDecoder;
 
-use util;
 use files::FileTree;
-use package::{StorePath, PathOrigin};
+use package::{PathOrigin, StorePath};
+use util;
 
 error_chain! {
     errors {
@@ -102,84 +102,102 @@ impl From<tokio_retry::Error<Error>> for Error {
 }
 
 enum Client {
-    Proxy(HyperClient< Rc<ProxyConnector<HttpConnector>>>, Rc<ProxyConnector<HttpConnector>>),
-    NoProxy(HyperClient<HttpConnector>)
+    Proxy(
+        HyperClient<Rc<ProxyConnector<HttpConnector>>>,
+        Rc<ProxyConnector<HttpConnector>>,
+    ),
+    NoProxy(HyperClient<HttpConnector>),
 }
 
-
 impl Client {
-    pub fn new(handle: &Handle)->Result<Client> {
+    pub fn new(handle: &Handle) -> Result<Client> {
         let connector = HttpConnector::new(4, handle);
         let http_proxy = var("HTTP_PROXY");
 
         match http_proxy {
-            Ok(proxy_url)=>{
-                let mut url = Url::parse(&proxy_url)
-                    .map_err(|_| ErrorKind::ParseProxy(proxy_url.clone()))?;
+            Ok(proxy_url) => {
+                let mut url =
+                    Url::parse(&proxy_url).map_err(|_| ErrorKind::ParseProxy(proxy_url.clone()))?;
                 let username = String::from(url.username()).clone();
                 let password = url.password().map(|pw| String::from(pw));
 
-                url.set_username("").map_err(|_|  url::ParseError::SetHostOnCannotBeABaseUrl)
+                url.set_username("")
+                    .map_err(|_| url::ParseError::SetHostOnCannotBeABaseUrl)
                     .map_err(|_| ErrorKind::ParseProxy(proxy_url.clone()))?;
-                url.set_password(None).map_err(|_| url::ParseError::SetHostOnCannotBeABaseUrl)
+                url.set_password(None)
+                    .map_err(|_| url::ParseError::SetHostOnCannotBeABaseUrl)
                     .map_err(|_| ErrorKind::ParseProxy(proxy_url.clone()))?;
 
                 // No need to check for the error. Because Url::parse()? already checked it.
                 let uri = url.to_string().parse().unwrap();
 
                 let intercept = match var("NO_PROXY") {
-                    Ok(urls)=>{ 
-                        Intercept::Custom(Custom::from(
-                             move |uri: &Uri|{
-                                let url_list = urls.split(",");
-                                url_list.into_iter().any(|pat_str|{
-                                    if pat_str == "*" {
-                                        false
-                                    } else {
-                                        let pat_uri = hyper::Uri::from_str(&pat_str);
+                    Ok(urls) => Intercept::Custom(Custom::from(move |uri: &Uri| {
+                        let url_list = urls.split(",");
+                        url_list.into_iter().any(|pat_str| {
+                            let pat_str = pat_str.trim();
 
-                                        match uri.host() {
-                                            Some(host)=>{
-                                                if let Ok(pat_uri) = pat_uri {
-                                                let pat_host = pat_uri.host();
+                            if pat_str == "*" {
+                                false
+                            } else {
+                                let pat_uri = hyper::Uri::from_str(&pat_str);
 
-                                                if let Some(pat_host) = pat_host {
-                                                    host.ends_with(&format!(".{}",pat_host)) || host == pat_host
-                                                } else {false}
-                                                } else {false}
+                                match uri.host() {
+                                    Some(host) => {
+                                        if let Ok(pat_uri) = pat_uri {
+                                            let pat_host = pat_uri.host();
+
+                                            if let Some(pat_host) = pat_host {
+                                                host.ends_with(&format!(".{}", pat_host))
+                                                    || host == pat_host
+                                            } else {
+                                                false
                                             }
-                                            None=>false
+                                        } else {
+                                            false
                                         }
                                     }
-                                })
+                                    None => false,
+                                }
                             }
-                        ))
-                    }
-                    Err(_)=>{Intercept::All}
+                        })
+                    })),
+                    Err(_) => Intercept::All,
                 };
 
                 let mut proxy = Proxy::new(intercept, uri);
 
                 if username != "" {
-                      proxy.set_authorization(Basic {
-                            username: username,
-                            password: password
-                      });
+                    proxy.set_authorization(Basic {
+                        username: username,
+                        password: password,
+                    });
                 }
 
-                let proxy_connector = Rc::new(hyper_proxy::ProxyConnector::from_proxy(connector, proxy)
-                    .map_err(|_| ErrorKind::ParseProxy(proxy_url.clone()))?);
+                let proxy_connector = Rc::new(
+                    hyper_proxy::ProxyConnector::from_proxy(connector, proxy)
+                        .map_err(|_| ErrorKind::ParseProxy(proxy_url.clone()))?,
+                );
 
-                Ok(Client::Proxy(hyper::Client::configure().connector(proxy_connector.clone())
-                        .build(handle), proxy_connector.clone()))
+                Ok(Client::Proxy(
+                    hyper::Client::configure()
+                        .connector(proxy_connector.clone())
+                        .build(handle),
+                    proxy_connector.clone(),
+                ))
             }
-            Err(_)=>{
-                Ok(Client::NoProxy(hyper::Client::configure().connector(connector).build(handle)))
-            }
+            Err(_) => Ok(Client::NoProxy(
+                hyper::Client::configure()
+                    .connector(connector)
+                    .build(handle),
+            )),
         }
     }
 
-    pub fn request(&self, req: hyper::Request<hyper::Body>) -> hyper::client::FutureResponse {
+    pub fn request(
+        &self,
+        req: hyper::Request<hyper::Body>,
+    ) -> hyper::client::FutureResponse {
         let mut req = req;
         match self {
             Client::Proxy(client, connector) => {
@@ -188,7 +206,7 @@ impl Client {
                     req.set_proxy(true);
                 }
                 client.request(req)
-            },
+            }
             Client::NoProxy(client) => client.request(req),
         }
     }
@@ -220,7 +238,10 @@ impl Fetcher {
     /// The `handle` argument is a Handle to the tokio event loop.
     ///
     /// `cache_url` specifies the URL of the binary cache (example: `https://cache.nixos.org`).
-    pub fn new(cache_url: String, handle: Handle) -> Result<Fetcher> {
+    pub fn new(
+        cache_url: String,
+        handle: Handle,
+    ) -> Result<Fetcher> {
         let client = Client::new(&handle)?;
         let timer = tokio_timer::wheel().build();
         Ok(Fetcher {
@@ -250,14 +271,15 @@ impl Fetcher {
         let strategy = ExponentialBackoff::from_millis(50)
             .max_delay(Duration::from_millis(5000))
             .take(20)
-             // add some jitter
+            // add some jitter
             .map(|x| tokio_retry::strategy::jitter(x))
-             // wait at least 5 seconds, as that is the time that cache.nixos.org caches 500 internal server errors
+            // wait at least 5 seconds, as that is the time that cache.nixos.org caches 500 internal server errors
             .map(|x| x + Duration::from_secs(5));
         Box::new(
             Retry::spawn(self.handle.clone(), strategy, move || {
                 self.fetch_noretry(url.clone(), encoding)
-            }).from_err(),
+            })
+            .from_err(),
         )
     }
 
@@ -279,7 +301,6 @@ impl Fetcher {
                 return Either::A(future::err(Error::from(ErrorKind::Http(url, code))));
             }
 
-
             // Determine the encoding. Uses the provided encoding or an encoding computed
             // from the response headers.
             let encoding = match encoding.or_else(|| compute_encoding(res.headers())) {
@@ -289,7 +310,8 @@ impl Fetcher {
                         ErrorKind::UnsupportedEncoding(
                             url,
                             res.headers().get::<ContentEncoding>().cloned(),
-                        ).into(),
+                        )
+                        .into(),
                     ))
                 }
             };
@@ -303,14 +325,15 @@ impl Fetcher {
             let decoded = match encoding {
                 Xz => {
                     let result = content
-                        .fold((url, XzDecoder::new(Vec::new())), move |(url,
-                               mut decoder),
-                              chunk| {
-                            decoder
-                                .write_all(&chunk)
-                                .chain_err(|| ErrorKind::Decode(url.clone()))
-                                .map(move |_| (url, decoder))
-                        })
+                        .fold(
+                            (url, XzDecoder::new(Vec::new())),
+                            move |(url, mut decoder), chunk| {
+                                decoder
+                                    .write_all(&chunk)
+                                    .chain_err(|| ErrorKind::Decode(url.clone()))
+                                    .map(move |_| (url, decoder))
+                            },
+                        )
                         .and_then(|(url, mut d)| {
                             d.finish()
                                 .chain_err(|| ErrorKind::Decode(url.clone()))
@@ -322,14 +345,15 @@ impl Fetcher {
 
                 Brotli => {
                     let result = content
-                        .fold((url, BrotliDecoder::new(Vec::new())), move |(url,
-                               mut decoder),
-                              chunk| {
-                            decoder
-                                .write_all(&chunk)
-                                .chain_err(|| ErrorKind::Decode(url.clone()))
-                                .map(move |_| (url, decoder))
-                        })
+                        .fold(
+                            (url, BrotliDecoder::new(Vec::new())),
+                            move |(url, mut decoder), chunk| {
+                                decoder
+                                    .write_all(&chunk)
+                                    .chain_err(|| ErrorKind::Decode(url.clone()))
+                                    .map(move |_| (url, decoder))
+                            },
+                        )
                         .and_then(|(url, mut d)| {
                             d.finish()
                                 .chain_err(|| ErrorKind::Decode(url.clone()))
@@ -350,7 +374,6 @@ impl Fetcher {
                 }
             };
 
-
             Either::B(decoded.map(|(url, v)| (url, Some(v))))
         };
 
@@ -367,9 +390,11 @@ impl Fetcher {
             )
         };
 
-        Box::new(future::result(uri).and_then(make_request).and_then(
-            process_response,
-        ))
+        Box::new(
+            future::result(uri)
+                .and_then(make_request)
+                .and_then(process_response),
+        )
     }
 
     /// Fetches the references of a given store path.
@@ -399,10 +424,10 @@ impl Fetcher {
             for line in data.split(|x| x == &b'\n') {
                 if line.starts_with(references) {
                     let line = &line[references.len()..];
-                    let line = str::from_utf8(line).map_err(|e| {
-                        ErrorKind::Unicode(url.clone(), line.to_vec(), e)
-                    })?;
-                    result = line.trim()
+                    let line = str::from_utf8(line)
+                        .map_err(|e| ErrorKind::Unicode(url.clone(), line.to_vec(), e))?;
+                    result = line
+                        .trim()
                         .split_whitespace()
                         .map(|new_path| {
                             let new_origin = PathOrigin {
@@ -418,15 +443,12 @@ impl Fetcher {
 
                 if line.starts_with(store_path) {
                     let line = &line[references.len()..];
-                    let line = str::from_utf8(line).map_err(|e| {
-                        ErrorKind::Unicode(url.clone(), line.to_vec(), e)
-                    })?;
+                    let line = str::from_utf8(line)
+                        .map_err(|e| ErrorKind::Unicode(url.clone(), line.to_vec(), e))?;
                     let line = line.trim();
 
-                    path =
-                        StorePath::parse(path.origin().into_owned(), line).ok_or_else(|| {
-                                ErrorKind::ParseStorePath(url.clone(), line.to_string())
-                            })?;
+                    path = StorePath::parse(path.origin().into_owned(), line)
+                        .ok_or_else(|| ErrorKind::ParseStorePath(url.clone(), line.to_string()))?;
                 }
             }
 
@@ -447,12 +469,12 @@ impl Fetcher {
         let url_generic = format!("{}/{}.ls", self.cache_url, path.hash());
         let name = format!("{}.json", path.hash());
 
-        let fetched = self.fetch(url_generic, None).and_then(
-            move |(url, r)| match r {
+        let fetched = self
+            .fetch(url_generic, None)
+            .and_then(move |(url, r)| match r {
                 Some(v) => Either::A(future::ok((url, Some(v)))),
                 None => Either::B(self.fetch(url_xz, Some(SupportedEncoding::Xz))),
-            },
-        );
+            });
 
         let parse_response = move |(url, res)| {
             let url: String = url;
@@ -463,9 +485,13 @@ impl Fetcher {
             };
 
             let now = Instant::now();
-            let response: FileListingResponse = serde_json::from_slice(&contents).chain_err(|| {
-                ErrorKind::ParseResponse(url, util::write_temp_file("file_listing.json", &contents))
-            })?;
+            let response: FileListingResponse =
+                serde_json::from_slice(&contents).chain_err(|| {
+                    ErrorKind::ParseResponse(
+                        url,
+                        util::write_temp_file("file_listing.json", &contents),
+                    )
+                })?;
             let duration = now.elapsed();
 
             if duration > Duration::from_millis(2000) {
@@ -477,13 +503,15 @@ impl Fetcher {
                     "warning: took a long time to parse: {}s:{:03}ms",
                     secs,
                     millis
-                ).unwrap_or(());
+                )
+                .unwrap_or(());
                 if let Some(p) = util::write_temp_file(&name, &contents) {
                     writeln!(
                         &mut io::stderr(),
                         "saved response to file: {}",
                         p.to_string_lossy()
-                    ).unwrap_or(());
+                    )
+                    .unwrap_or(());
                 }
             }
 
@@ -491,7 +519,6 @@ impl Fetcher {
         };
 
         Box::new(fetched.and_then(parse_response))
-
     }
 }
 
@@ -528,10 +555,7 @@ fn compute_encoding(headers: &Headers) -> Option<SupportedEncoding> {
         Encoding::EncodingExt(ref ext) if ext == "xz" => Some(SupportedEncoding::Xz),
         _ => None,
     }
-
 }
-
-
 
 /// This data type represents the format of the `.ls` files fetched from the binary cache.
 ///
@@ -564,7 +588,10 @@ impl<'de> Deserialize<'de> for HydraFileListing {
         impl<'de> Visitor<'de> for Root {
             type Value = FileTree;
 
-            fn expecting(&self, f: &mut fmt::Formatter) -> fmt::Result {
+            fn expecting(
+                &self,
+                f: &mut fmt::Formatter,
+            ) -> fmt::Result {
                 write!(f, "a file listing (map)")
             }
 
@@ -624,8 +651,8 @@ impl<'de> Deserialize<'de> for HydraFileListing {
                 }
 
                 // the type field must always be present so we know which type to expect
-                let typ = &try!(typ.ok_or_else(|| serde::de::Error::missing_field("type"))) as
-                    &[u8];
+                let typ =
+                    &try!(typ.ok_or_else(|| serde::de::Error::missing_field("type"))) as &[u8];
 
                 match typ {
                     b"regular" => {
@@ -634,24 +661,20 @@ impl<'de> Deserialize<'de> for HydraFileListing {
                         Ok(FileTree::regular(size, executable))
                     }
                     b"directory" => {
-                        let entries = entries.ok_or_else(
-                            || serde::de::Error::missing_field("entries"),
-                        )?;
+                        let entries =
+                            entries.ok_or_else(|| serde::de::Error::missing_field("entries"))?;
                         let entries = entries.into_iter().map(|(k, v)| (k, v.0)).collect();
                         Ok(FileTree::directory(entries))
                     }
                     b"symlink" => {
-                        let target = target.ok_or_else(
-                            || serde::de::Error::missing_field("target"),
-                        )?;
+                        let target =
+                            target.ok_or_else(|| serde::de::Error::missing_field("target"))?;
                         Ok(FileTree::symlink(target))
                     }
-                    _ => {
-                        Err(serde::de::Error::unknown_variant(
-                            &String::from_utf8_lossy(typ),
-                            VARIANTS,
-                        ))
-                    }
+                    _ => Err(serde::de::Error::unknown_variant(
+                        &String::from_utf8_lossy(typ),
+                        VARIANTS,
+                    )),
                 }
             }
         }
