@@ -122,10 +122,8 @@ impl Client {
                 let password = url.password().map(|pw| String::from(pw));
 
                 url.set_username("")
-                    .map_err(|_| url::ParseError::SetHostOnCannotBeABaseUrl)
                     .map_err(|_| ErrorKind::ParseProxy(proxy_url.clone()))?;
                 url.set_password(None)
-                    .map_err(|_| url::ParseError::SetHostOnCannotBeABaseUrl)
                     .map_err(|_| ErrorKind::ParseProxy(proxy_url.clone()))?;
 
                 // No need to check for the error. Because Url::parse()? already checked it.
@@ -148,13 +146,13 @@ impl Client {
                                             let pat_host = pat_uri.host();
 
                                             if let Some(pat_host) = pat_host {
-                                                host.ends_with(&format!(".{}", pat_host))
-                                                    || host == pat_host
+                                                !(host.ends_with(&format!(".{}", pat_host))
+                                                    || host == pat_host)
                                             } else {
-                                                false
+                                                true
                                             }
                                         } else {
-                                            false
+                                            true
                                         }
                                     }
                                     None => false,
