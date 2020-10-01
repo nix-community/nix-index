@@ -22,9 +22,11 @@ extern crate memchr;
 extern crate byteorder;
 extern crate xz2;
 extern crate hyper;
+extern crate hyper_proxy;
 #[macro_use]
 extern crate error_chain;
 extern crate brotli2;
+extern crate url;
 
 pub mod nixpkgs;
 pub mod files;

@@ -77,6 +77,10 @@ error_chain! {
             description("database write error")
             display("writing to the database '{}' failed", path.to_string_lossy())
         }
+        ParseProxy(err: nix_index::hydra::Error){
+            description("proxy parse error")
+            display("Can not parse proxy settings")
+        }
     }
 }
 
@@ -180,7 +184,8 @@ fn update_index(args: &Args, lp: &mut Core) -> Result<()> {
     // first try to load the paths.cache if requested, otherwise query
     // the packages normally. Also fall back to normal querying if the paths.cache
     // fails to load.
-    let fetcher = Fetcher::new(CACHE_URL.to_string(), lp.handle());
+    let fetcher = Fetcher::new(CACHE_URL.to_string(), lp.handle())
+        .map_err(|e| ErrorKind::ParseProxy(e))?;
     let query = || -> Result<_> {
         if args.path_cache {
             if let Some(cached) = try_load_paths_cache()? {

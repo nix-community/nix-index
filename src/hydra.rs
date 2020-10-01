@@ -11,21 +11,25 @@ use std::result;
 use std::str::{self, Utf8Error, FromStr};
 use std::collections::HashMap;
 use std::io::{self, Write};
+use std::env::var;
 use std::path::PathBuf;
 use std::time::{Instant, Duration};
+use std::rc::Rc;
 use futures::{Stream, Future};
 use futures::future::{self, Either};
 use xz2::write::XzDecoder;
 use serde::de::{Deserialize, Deserializer, MapAccess, Visitor};
 use serde_bytes::ByteBuf;
-use hyper::client::{Client, Response, HttpConnector, Request};
+use hyper::client::{Client as HyperClient, Response, HttpConnector, Request};
 use hyper::{self, Uri, StatusCode, Method};
-use hyper::header::{AcceptEncoding, ContentEncoding, Encoding, Headers, qitem};
+use hyper::header::{AcceptEncoding, ContentEncoding, Encoding, Headers, qitem, Basic};
+use hyper_proxy::{ProxyConnector, Intercept, Proxy,Custom};
 use brotli2::write::BrotliDecoder;
 use tokio_timer::{self, Timer, TimeoutError};
 use tokio_retry::{self, Retry};
 use tokio_retry::strategy::ExponentialBackoff;
 use tokio_core::reactor::Handle;
+use url::Url;
 
 use util;
 use files::FileTree;
@@ -67,6 +71,10 @@ error_chain! {
         TimerError {
             description("timer failure")
         }
+        ParseProxy(url: String) {
+            description("proxy config error")
+            display("Can not parse proxy url ({})", url)
+        }
     }
     foreign_links {
         Hyper(hyper::Error);
@@ -93,6 +101,99 @@ impl From<tokio_retry::Error<Error>> for Error {
     }
 }
 
+enum Client {
+    Proxy(HyperClient< Rc<ProxyConnector<HttpConnector>>>, Rc<ProxyConnector<HttpConnector>>),
+    NoProxy(HyperClient<HttpConnector>)
+}
+
+
+impl Client {
+    pub fn new(handle: &Handle)->Result<Client> {
+        let connector = HttpConnector::new(4, handle);
+        let http_proxy = var("HTTP_PROXY");
+
+        match http_proxy {
+            Ok(proxy_url)=>{
+                let mut url = Url::parse(&proxy_url)
+                    .map_err(|_| ErrorKind::ParseProxy(proxy_url.clone()))?;
+                let username = String::from(url.username()).clone();
+                let password = url.password().map(|pw| String::from(pw));
+
+                url.set_username("").map_err(|_|  url::ParseError::SetHostOnCannotBeABaseUrl)
+                    .map_err(|_| ErrorKind::ParseProxy(proxy_url.clone()))?;
+                url.set_password(None).map_err(|_| url::ParseError::SetHostOnCannotBeABaseUrl)
+                    .map_err(|_| ErrorKind::ParseProxy(proxy_url.clone()))?;
+
+                // No need to check for the error. Because Url::parse()? already checked it.
+                let uri = url.to_string().parse().unwrap();
+
+                let intercept = match var("NO_PROXY") {
+                    Ok(urls)=>{ 
+                        Intercept::Custom(Custom::from(
+                             move |uri: &Uri|{
+                                let url_list = urls.split(",");
+                                url_list.into_iter().any(|pat_str|{
+                                    if pat_str == "*" {
+                                        false
+                                    } else {
+                                        let pat_uri = hyper::Uri::from_str(&pat_str);
+
+                                        match uri.host() {
+                                            Some(host)=>{
+                                                if let Ok(pat_uri) = pat_uri {
+                                                let pat_host = pat_uri.host();
+
+                                                if let Some(pat_host) = pat_host {
+                                                    host.ends_with(&format!(".{}",pat_host)) || host == pat_host
+                                                } else {false}
+                                                } else {false}
+                                            }
+                                            None=>false
+                                        }
+                                    }
+                                })
+                            }
+                        ))
+                    }
+                    Err(_)=>{Intercept::All}
+                };
+
+                let mut proxy = Proxy::new(intercept, uri);
+
+                if username != "" {
+                      proxy.set_authorization(Basic {
+                            username: username,
+                            password: password
+                      });
+                }
+
+                let proxy_connector = Rc::new(hyper_proxy::ProxyConnector::from_proxy(connector, proxy)
+                    .map_err(|_| ErrorKind::ParseProxy(proxy_url.clone()))?);
+
+                Ok(Client::Proxy(hyper::Client::configure().connector(proxy_connector.clone())
+                        .build(handle), proxy_connector.clone()))
+            }
+            Err(_)=>{
+                Ok(Client::NoProxy(hyper::Client::configure().connector(connector).build(handle)))
+            }
+        }
+    }
+
+    pub fn request(&self, req: hyper::Request<hyper::Body>) -> hyper::client::FutureResponse {
+        let mut req = req;
+        match self {
+            Client::Proxy(client, connector) => {
+                if let Some(headers) = connector.http_headers(&req.uri()) {
+                    req.headers_mut().extend(headers.iter());
+                    req.set_proxy(true);
+                }
+                client.request(req)
+            },
+            Client::NoProxy(client) => client.request(req),
+        }
+    }
+}
+
 /// A Fetcher allows you to make requests to Hydra/the binary cache.
 ///
 /// It holds all the relevant state for performing requests, such as for example
@@ -101,7 +202,7 @@ impl From<tokio_retry::Error<Error>> for Error {
 /// You should use a single instance of this struct to make all your hydra/binary cache
 /// requests.
 pub struct Fetcher {
-    client: Client<HttpConnector>,
+    client: Client,
     timer: Timer,
     cache_url: String,
     handle: Handle,
@@ -119,15 +220,15 @@ impl Fetcher {
     /// The `handle` argument is a Handle to the tokio event loop.
     ///
     /// `cache_url` specifies the URL of the binary cache (example: `https://cache.nixos.org`).
-    pub fn new(cache_url: String, handle: Handle) -> Fetcher {
-        let client = Client::new(&handle);
+    pub fn new(cache_url: String, handle: Handle) -> Result<Fetcher> {
+        let client = Client::new(&handle)?;
         let timer = tokio_timer::wheel().build();
-        Fetcher {
+        Ok(Fetcher {
             client: client,
             timer: timer,
             cache_url: cache_url,
             handle: handle,
-        }
+        })
     }
 
     /// Sends a GET request to the given URL and decodes the response with the given encoding.
