@@ -260,6 +260,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "fnv"
+version = "1.0.7"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "3f9eec918d3f24069decb9af1554cad7c880e2da24a9afd88aca000531ab82c1"
+
+[[package]]
 name = "foreign-types"
 version = "0.3.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -331,6 +337,41 @@ dependencies = [
 ]
 
 [[package]]
+name = "h2"
+version = "0.1.26"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a5b34c246847f938a410a03c5458c7fee2274436675e76d8b903c08efc29c462"
+dependencies = [
+ "byteorder",
+ "bytes",
+ "fnv",
+ "futures",
+ "http",
+ "indexmap",
+ "log 0.4.5",
+ "slab 0.4.1",
+ "string",
+ "tokio-io",
+]
+
+[[package]]
+name = "hashbrown"
+version = "0.9.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d7afe4a420e3fe79967a00898cc1f4db7c8a49a9333a29f8a4bd76a253d5cd04"
+
+[[package]]
+name = "http"
+version = "0.1.21"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d6ccf5ede3a895d8856620237b2f02972c1bbc78d2965ad7fe8838d4a0ed41f0"
+dependencies = [
+ "bytes",
+ "fnv",
+ "itoa",
+]
+
+[[package]]
 name = "httparse"
 version = "1.3.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -360,7 +401,34 @@ dependencies = [
  "tokio-proto",
  "tokio-service",
  "unicase",
- "want",
+ "want 0.0.4",
+]
+
+[[package]]
+name = "hyper"
+version = "0.12.19"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f1ebec079129e43af5e234ef36ee3d7e6085687d145b7ea653b262d16c6b65f1"
+dependencies = [
+ "bytes",
+ "futures",
+ "futures-cpupool",
+ "h2",
+ "http",
+ "httparse",
+ "iovec",
+ "itoa",
+ "log 0.4.5",
+ "net2",
+ "time",
+ "tokio",
+ "tokio-executor",
+ "tokio-io",
+ "tokio-reactor",
+ "tokio-tcp",
+ "tokio-threadpool",
+ "tokio-timer 0.2.6",
+ "want 0.0.6",
 ]
 
 [[package]]
@@ -371,7 +439,7 @@ checksum = "44f0925de2747e481e6e477dd212c25e8f745567f02f6182e04d27b97c3fbece"
 dependencies = [
  "bytes",
  "futures",
- "hyper",
+ "hyper 0.11.27",
  "hyper-tls",
  "native-tls",
  "tokio-core",
@@ -386,7 +454,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ffb1bd5e518d3065840ab315dbbf44e4420e5f7d80e2cb93fa6ffffc50522378"
 dependencies = [
  "futures",
- "hyper",
+ "hyper 0.11.27",
  "native-tls",
  "tokio-core",
  "tokio-io",
@@ -403,6 +471,16 @@ dependencies = [
  "matches",
  "unicode-bidi",
  "unicode-normalization",
+]
+
+[[package]]
+name = "indexmap"
+version = "1.6.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "55e2e4c765aa53a0424761bf9f41aa7a6ac1efa87238f59560640e27fca028f2"
+dependencies = [
+ "autocfg",
+ "hashbrown",
 ]
 
 [[package]]
@@ -628,7 +706,7 @@ dependencies = [
  "error-chain",
  "futures",
  "grep",
- "hyper",
+ "hyper 0.12.19",
  "hyper-proxy",
  "isatty",
  "memchr",
@@ -1036,6 +1114,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "string"
+version = "0.2.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d24114bfcceb867ca7f71a0d3fe45d45619ec47a6fbfa98cb14e14250bfa5d6d"
+dependencies = [
+ "bytes",
+]
+
+[[package]]
 name = "strsim"
 version = "0.7.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1365,6 +1452,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ee2aa4715743892880f70885373966c83d73ef1b0838a664ef0c76fffd35e7c2"
 
 [[package]]
+name = "try-lock"
+version = "0.2.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "59547bce71d9c38b83d9c0e92b6066c4253371f15005def0c30d9657f50c7642"
+
+[[package]]
 name = "ucd-util"
 version = "0.1.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1467,7 +1560,18 @@ checksum = "a05d9d966753fa4b5c8db73fcab5eed4549cfe0e1e4e66911e5564a0085c35d1"
 dependencies = [
  "futures",
  "log 0.4.5",
- "try-lock",
+ "try-lock 0.1.0",
+]
+
+[[package]]
+name = "want"
+version = "0.0.6"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "797464475f30ddb8830cc529aaaae648d581f99e2036a928877dfde027ddf6b3"
+dependencies = [
+ "futures",
+ "log 0.4.5",
+ "try-lock 0.2.3",
 ]
 
 [[package]]
