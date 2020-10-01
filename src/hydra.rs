@@ -132,11 +132,11 @@ impl Client {
                 let intercept = match var("NO_PROXY") {
                     Ok(urls) => Intercept::Custom(Custom::from(move |uri: &Uri| {
                         let url_list = urls.split(",");
-                        url_list.into_iter().any(|pat_str| {
+                        !url_list.into_iter().any(|pat_str| {
                             let pat_str = pat_str.trim();
 
                             if pat_str == "*" {
-                                false
+                                true
                             } else {
                                 let pat_uri = hyper::Uri::from_str(&pat_str);
 
@@ -146,16 +146,16 @@ impl Client {
                                             let pat_host = pat_uri.host();
 
                                             if let Some(pat_host) = pat_host {
-                                                !(host.ends_with(&format!(".{}", pat_host))
-                                                    || host == pat_host)
+                                                host.ends_with(&format!(".{}", pat_host))
+                                                    || host == pat_host
                                             } else {
-                                                true
+                                                false
                                             }
                                         } else {
-                                            true
+                                            false
                                         }
                                     }
-                                    None => false,
+                                    None => true,
                                 }
                             }
                         })
