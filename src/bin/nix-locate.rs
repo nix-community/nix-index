@@ -31,7 +31,7 @@ error_chain! {
         ReadDatabase(database: PathBuf) {
             description("database read error")
             display("reading from the database at '{}' failed.\n\
-                     This may be caused by a corrupt or missing database, try (re)running `nix-index`` to generate the database. \n\
+                     This may be caused by a corrupt or missing database, try (re)running `nix-index` to generate the database. \n\
                      If the error persists please file a bug report at https://github.com/bennofs/nix-index.", database.to_string_lossy())
         }
         Grep(pattern: String) {
