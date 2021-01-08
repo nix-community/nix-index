@@ -350,7 +350,7 @@ fn main() {
              .short("c")
              .long("compression")
              .help("Zstandard compression level")
-             .default_value("22"))
+             .default_value("19"))
         .arg(Arg::with_name("show-trace")
              .long("show-trace")
              .help("Show a stack trace in case of Nix expression evaluation errors")
