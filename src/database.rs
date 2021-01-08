@@ -30,7 +30,7 @@ const FILE_MAGIC: &'static [u8] = b"NIXI";
 pub struct Writer {
     /// The encoder used to compress the database. Will be set to `None` when the value
     /// is dropped.
-    writer: Option<BufWriter<zstd::Encoder<File>>>,
+    writer: Option<BufWriter<zstd::Encoder<'static, File>>>,
 }
 
 // We need to make sure that the encoder is `finish`ed in all cases, so we need
@@ -126,7 +126,7 @@ impl From<frcode::Error> for Error {
 
 /// A Reader allows fast querying of a nix-index database.
 pub struct Reader {
-    decoder: frcode::Decoder<BufReader<zstd::Decoder<File>>>,
+    decoder: frcode::Decoder<BufReader<zstd::Decoder<'static, BufReader<File>>>>,
 }
 
 impl Reader {
