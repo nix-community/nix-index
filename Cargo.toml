@@ -22,6 +22,7 @@ grep = "0.1.7"
 hyper = "0.11.12"
 isatty = "0.1.6"
 memchr = "2.0.2"
+num_cpus = "1.13.0"
 ordermap = "0.3.4"
 regex = "1.0.5"
 regex-syntax = "0.4.2"
@@ -38,7 +39,7 @@ void = "1.0.2"
 xdg = "2.1.0"
 xml-rs = "0.8.0"
 xz2 = "0.1.4"
-zstd = "0.6.0+zstd.1.4.8"
+zstd = { version = "0.6.0+zstd.1.4.8", features = [ "zstdmt" ] }
 
 [[example]]
 name = "nix-index-debug"

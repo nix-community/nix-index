@@ -50,7 +50,8 @@ impl Writer {
         let mut file = File::create(path)?;
         file.write_all(FILE_MAGIC)?;
         file.write_u64::<LittleEndian>(FORMAT_VERSION)?;
-        let encoder = zstd::Encoder::new(file, level)?;
+        let mut encoder = zstd::Encoder::new(file, level)?;
+        encoder.multithread(num_cpus::get() as u32)?;
 
         Ok(Writer { writer: Some(BufWriter::new(encoder)) })
     }
