@@ -22,9 +22,12 @@ use futures::{Future, Stream};
 use std::result;
 use std::fs::{self, File};
 use std::io::{self, Write};
+use std::iter;
 use std::path::PathBuf;
 use std::process;
 use std::str;
+use std::sync::mpsc::channel;
+use std::thread;
 use std::iter::FromIterator;
 use tokio_core::reactor::Core;
 use separator::Separatable;
@@ -206,11 +209,29 @@ fn update_index(args: &Args, lp: &mut Core) -> Result<()> {
             "rPackages",
             "nodePackages",
             "coqPackages",
-        ];
+        ].iter().map(|scope| nixpkgs::query_packages(&args.nixpkgs, Some(scope), args.show_trace));
 
-        let all_paths = normal_paths.chain(extra_scopes.into_iter().flat_map(|scope| {
-            nixpkgs::query_packages(&args.nixpkgs, Some(scope), args.show_trace)
-        }));
+        // Collect results in parallel.
+        let rx = {
+            let (tx, rx) = channel();
+            let handles : Vec<thread::JoinHandle<_>> =
+                iter::once(normal_paths).chain(extra_scopes).map(|path_iter| {
+                    let tx = tx.clone();
+                    thread::spawn(move || {
+                        for path in path_iter {
+                            tx.send(path).unwrap();
+                        }
+                    })
+                }).collect();
+
+            for h in handles {
+                h.join().unwrap();
+            }
+
+            rx
+        };
+
+        let all_paths = rx.iter();
 
         let paths: Vec<StorePath> = all_paths
             .map(|x| x.chain_err(|| ErrorKind::QueryPackages))
