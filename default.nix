@@ -1,6 +1,6 @@
 let
-  # nixpkgs-unstable at 2019-07-06 16:03
-  nixpkgsRev = "df738814d1bed1a554eac1536e99253ab75ba012";
+  # nixpkgs-unstable at 2021-10-16 18:26
+  nixpkgsRev = "8e1eab9eae4278c9bb1dcae426848a581943db5a";
   defaultNixpkgs = builtins.fetchTarball "github.com/NixOS/nixpkgs/archive/${nixpkgsRev}.tar.gz";
 in
 { nixpkgs ? defaultNixpkgs }:
@@ -9,11 +9,14 @@ with (import nixpkgs {}); with rustPlatform;
 
 buildRustPackage rec {
   name = "nix-index-${version}";
-  version = "0.1.2";
+  version = "0.1.3";
 
   src = builtins.filterSource (name: type: !lib.hasPrefix "target" (baseNameOf name) && !lib.hasPrefix "result" (baseNameOf name) && name != ".git") ./.;
-  buildInputs = [pkgconfig openssl curl];
-  cargoSha256 = "10cg4wf36hkzp4fbws0f6wk12zkh6gsy92raq4d6kyhp7myp7p3d";
+  buildInputs = [openssl curl];
+  nativeBuildInputs = [ pkg-config ];
+  cargoLock = {
+    lockFile = ./Cargo.lock;
+  };
 
   postInstall = ''
     mkdir -p $out/etc/profile.d
@@ -22,7 +25,7 @@ buildRustPackage rec {
       --replace "@out@" "$out"
   '';
 
-  meta = with stdenv.lib; {
+  meta = with lib; {
     description = "A files database for nixpkgs";
     homepage = https://github.com/bennofs/nix-index;
     license = with licenses; [ bsd3 ];
