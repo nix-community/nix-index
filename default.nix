@@ -14,9 +14,7 @@ buildRustPackage rec {
   src = builtins.filterSource (name: type: !lib.hasPrefix "target" (baseNameOf name) && !lib.hasPrefix "result" (baseNameOf name) && name != ".git") ./.;
   buildInputs = [openssl curl];
   nativeBuildInputs = [ pkg-config ];
-  cargoLock = {
-    lockFile = ./Cargo.lock;
-  };
+  cargoSha256 = "0jndrr1lyvbc5fjbm9hnxis3hkd120awipnqnqqnaddqhvlsx85f";
 
   postInstall = ''
     mkdir -p $out/etc/profile.d
