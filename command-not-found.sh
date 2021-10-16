@@ -76,6 +76,9 @@ EOF
 The program '$cmd' is currently not installed. You can install it
 by typing:
   nix profile install $toplevel#$attrs
+
+Or run it once with:
+  nix run $toplevel#$attrs --command ...
 EOF
                 else
                     >&2 cat <<EOF
@@ -111,7 +114,11 @@ Or run it once with:
 EOF
 
             while read attr; do
-                >&2 echo "  nix-shell -p $attr --run ..."
+                if [ -e "$HOME/.nix-profile/manifest.json" ]; then
+                    >&2 echo "  nix run $toplevel#$attr --command ..."
+                else
+                    >&2 echo "  nix-shell -p $attr --run ..."
+                fi
             done <<< "$attrs"
             ;;
     esac
