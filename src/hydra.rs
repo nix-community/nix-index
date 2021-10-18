@@ -653,7 +653,7 @@ impl<'de> Deserialize<'de> for HydraFileListing {
 
 
                 match typ {
-                    b"byte" => {
+                    b"regular" => {
                         let size = size.ok_or_else(|| serde::de::Error::missing_field("size"))?;
                         let executable = executable.unwrap_or(false);
                         Ok(FileTree::regular(size, executable))
