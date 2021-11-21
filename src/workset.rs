@@ -52,14 +52,15 @@
 //!    // and pkgD itself
 //! }
 //! ```
-use futures::{Stream, Async, Poll};
-use std::collections::HashSet;
+use futures::Stream;
 use ordermap::OrderMap;
-use void::Void;
-use std::rc::{Rc, Weak};
 use std::cell::RefCell;
+use std::collections::HashSet;
 use std::hash::Hash;
 use std::iter::FromIterator;
+use std::pin::Pin;
+use std::rc::{Rc, Weak};
+use std::task::{Context, Poll};
 
 /// This structure holds the internal state of our queue.
 struct Shared<K, V> {
@@ -190,24 +191,26 @@ impl<K: Hash + Eq + 'static, V: 'static> FromIterator<(K, V)> for WorkSet<K, V> 
 /// for when exactly that happens.
 impl<K: Hash + Eq, V> Stream for WorkSet<K, V> {
     type Item = (WorkSetHandle<K, V>, V);
-    type Error = Void;
 
-    fn poll(&mut self) -> Poll<Option<Self::Item>, Self::Error> {
+    fn poll_next(
+        self: Pin<&mut Self>,
+        _cx: &mut Context<'_>,
+    ) -> Poll<Option<Self::Item>> {
         let (k, v) = match self.state.borrow_mut().queue.pop() {
             Some(e) => e,
             None => {
-                return Ok({
-                    if Rc::strong_count(&self.state) == 1 {
-                        Async::Ready(None)
-                    } else {
-                        Async::NotReady
-                    }
-                })
+                return if Rc::strong_count(&self.state) == 1 {
+                    Poll::Ready(None)
+                } else {
+                    Poll::Pending
+                }
             }
         };
 
         self.state.borrow_mut().seen.insert(k);
-        let handle = WorkSetHandle { state: self.state.clone() };
-        Ok(Async::Ready(Some((handle, v))))
+        let handle = WorkSetHandle {
+            state: self.state.clone(),
+        };
+        Poll::Ready(Some((handle, v)))
     }
 }

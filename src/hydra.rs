@@ -8,10 +8,10 @@ use serde_json;
 
 use brotli2::write::BrotliDecoder;
 use futures::future::{self, Either};
-use futures::{Future, Stream};
-use hyper::client::{Client as HyperClient, HttpConnector, Request, Response};
-use hyper::header::{qitem, AcceptEncoding, Basic, ContentEncoding, Encoding, Headers};
-use hyper::{self, Method, StatusCode, Uri};
+use futures::{Future, TryFutureExt};
+use headers::{Authorization, HeaderValue};
+use hyper::client::{Client as HyperClient, HttpConnector};
+use hyper::{self, Body, Request, StatusCode, Uri};
 use hyper_proxy::{Custom, Intercept, Proxy, ProxyConnector};
 use serde::de::{Deserialize, Deserializer, MapAccess, Visitor};
 use serde_bytes::ByteBuf;
@@ -20,14 +20,16 @@ use std::env::var;
 use std::fmt;
 use std::io::{self, Write};
 use std::path::PathBuf;
-use std::rc::Rc;
+use std::pin::Pin;
 use std::result;
 use std::str::{self, FromStr, Utf8Error};
 use std::time::{Duration, Instant};
-use tokio_core::reactor::Handle;
+use tokio::runtime::Handle;
+use tokio::time::error::Elapsed;
+use tokio::time::timeout;
 use tokio_retry::strategy::ExponentialBackoff;
 use tokio_retry::{self, Retry};
-use tokio_timer::{self, TimeoutError, Timer};
+use tokio_stream::StreamExt;
 use url::Url;
 use xz2::write::XzDecoder;
 
@@ -57,7 +59,7 @@ error_chain! {
             description("decoder error")
             display("response to GET '{}' could not be decoded", url)
         }
-        UnsupportedEncoding(url: String, encoding: Option<ContentEncoding>) {
+        UnsupportedEncoding(url: String, encoding: Option<String>) {
             description("unsupported content-encoding")
             display(
                 "response to GET '{}' had unsupported content-encoding ({})",
@@ -81,37 +83,23 @@ error_chain! {
     }
 }
 
-impl<T> From<TimeoutError<T>> for Error {
-    fn from(err: TimeoutError<T>) -> Error {
-        use self::TimeoutError::*;
-        match err {
-            Timer(_, e) => Error::with_chain(e, ErrorKind::TimerError),
-            TimedOut(_) => Error::from(ErrorKind::Timeout),
-        }
-    }
-}
-
-impl From<tokio_retry::Error<Error>> for Error {
-    fn from(err: tokio_retry::Error<Error>) -> Error {
-        use tokio_retry::Error::*;
-        match err {
-            TimerError(e) => Error::with_chain(e, ErrorKind::TimerError),
-            OperationError(e) => e,
-        }
+impl From<Elapsed> for Error {
+    fn from(_err: Elapsed) -> Self {
+        return Error::from(ErrorKind::Timeout);
     }
 }
 
 enum Client {
     Proxy(
-        HyperClient<Rc<ProxyConnector<HttpConnector>>>,
-        Rc<ProxyConnector<HttpConnector>>,
+        HyperClient<ProxyConnector<HttpConnector>>,
+        ProxyConnector<HttpConnector>,
     ),
     NoProxy(HyperClient<HttpConnector>),
 }
 
 impl Client {
-    pub fn new(handle: &Handle) -> Result<Client> {
-        let connector = HttpConnector::new(4, handle);
+    pub fn new(_handle: &Handle) -> Result<Client> {
+        let connector = HttpConnector::new();
         let http_proxy = var("HTTP_PROXY");
 
         match http_proxy {
@@ -130,78 +118,71 @@ impl Client {
                 let uri = url.to_string().parse().unwrap();
 
                 let intercept = match var("NO_PROXY") {
-                    Ok(urls) => Intercept::Custom(Custom::from(move |uri: &Uri| {
-                        let url_list = urls.split(",");
-                        !url_list.into_iter().any(|pat_str| {
-                            let pat_str = pat_str.trim();
+                    Ok(urls) => Intercept::Custom(Custom::from(
+                        move |_scheme: Option<&str>, host: Option<&str>, _port: Option<u16>| {
+                            let url_list = urls.split(",");
+                            !url_list.into_iter().any(|pat_str| {
+                                let pat_str = pat_str.trim();
 
-                            if pat_str == "*" {
-                                true
-                            } else {
-                                let pat_uri = hyper::Uri::from_str(&pat_str);
+                                if pat_str == "*" {
+                                    true
+                                } else {
+                                    let pat_uri = hyper::Uri::from_str(&pat_str);
 
-                                match uri.host() {
-                                    Some(host) => {
-                                        if let Ok(pat_uri) = pat_uri {
-                                            let pat_host = pat_uri.host();
+                                    match host {
+                                        Some(host) => {
+                                            if let Ok(pat_uri) = pat_uri {
+                                                let pat_host = pat_uri.host();
 
-                                            if let Some(pat_host) = pat_host {
-                                                host.ends_with(&format!(".{}", pat_host))
-                                                    || host == pat_host
+                                                if let Some(pat_host) = pat_host {
+                                                    host.ends_with(&format!(".{}", pat_host))
+                                                        || host == pat_host
+                                                } else {
+                                                    false
+                                                }
                                             } else {
                                                 false
                                             }
-                                        } else {
-                                            false
                                         }
+                                        None => true,
                                     }
-                                    None => true,
                                 }
-                            }
-                        })
-                    })),
+                            })
+                        },
+                    )),
                     Err(_) => Intercept::All,
                 };
 
                 let mut proxy = Proxy::new(intercept, uri);
 
                 if username != "" {
-                    proxy.set_authorization(Basic {
-                        username: username,
-                        password: password,
-                    });
+                    proxy.set_authorization(Authorization::basic(
+                        &username,
+                        &password.unwrap_or_default(),
+                    ));
                 }
 
-                let proxy_connector = Rc::new(
-                    hyper_proxy::ProxyConnector::from_proxy(connector, proxy)
-                        .map_err(|_| ErrorKind::ParseProxy(proxy_url.clone()))?,
-                );
+                let proxy_connector = hyper_proxy::ProxyConnector::from_proxy(connector, proxy)
+                    .map_err(|_| ErrorKind::ParseProxy(proxy_url.clone()))?;
 
                 Ok(Client::Proxy(
-                    hyper::Client::configure()
-                        .connector(proxy_connector.clone())
-                        .build(handle),
-                    proxy_connector.clone(),
+                    hyper::Client::builder().build(proxy_connector.clone()),
+                    proxy_connector,
                 ))
             }
-            Err(_) => Ok(Client::NoProxy(
-                hyper::Client::configure()
-                    .connector(connector)
-                    .build(handle),
-            )),
+            Err(_) => Ok(Client::NoProxy(HyperClient::builder().build(connector))),
         }
     }
 
     pub fn request(
         &self,
         req: hyper::Request<hyper::Body>,
-    ) -> hyper::client::FutureResponse {
+    ) -> hyper::client::ResponseFuture {
         let mut req = req;
         match self {
             Client::Proxy(client, connector) => {
                 if let Some(headers) = connector.http_headers(&req.uri()) {
-                    req.headers_mut().extend(headers.iter());
-                    req.set_proxy(true);
+                    req.headers_mut().extend(headers.clone().into_iter());
                 }
                 client.request(req)
             }
@@ -219,7 +200,6 @@ impl Client {
 /// requests.
 pub struct Fetcher {
     client: Client,
-    timer: Timer,
     cache_url: String,
     handle: Handle,
 }
@@ -228,7 +208,7 @@ const RESPONSE_TIMEOUT_MS: u64 = 1000;
 const CONNECT_TIMEOUT_MS: u64 = 10000;
 
 /// A boxed future using this module's error type.
-type BoxFuture<'a, I> = Box<dyn Future<Item = I, Error = Error> + 'a>;
+type BoxFuture<'a, I> = Pin<Box<dyn Future<Output = Result<I>> + 'a>>;
 
 impl Fetcher {
     /// Initializes a new instance of the `Fetcher` struct.
@@ -241,10 +221,8 @@ impl Fetcher {
         handle: Handle,
     ) -> Result<Fetcher> {
         let client = Client::new(&handle)?;
-        let timer = tokio_timer::wheel().build();
         Ok(Fetcher {
             client: client,
-            timer: timer,
             cache_url: cache_url,
             handle: handle,
         })
@@ -273,126 +251,95 @@ impl Fetcher {
             .map(|x| tokio_retry::strategy::jitter(x))
             // wait at least 5 seconds, as that is the time that cache.nixos.org caches 500 internal server errors
             .map(|x| x + Duration::from_secs(5));
-        Box::new(
-            Retry::spawn(self.handle.clone(), strategy, move || {
-                self.fetch_noretry(url.clone(), encoding)
-            })
-            .from_err(),
-        )
+        Box::pin(Retry::spawn(strategy, move || {
+            Box::pin(self.fetch_noretry(url.clone(), encoding))
+        }))
     }
 
     /// The implementation of `fetch`, without the retry logic.
-    fn fetch_noretry(
+    async fn fetch_noretry(
         &self,
         url: String,
         encoding: Option<SupportedEncoding>,
-    ) -> BoxFuture<(String, Option<Vec<u8>>)> {
-        let uri = Uri::from_str(&url).map_err(|e| Error::from(hyper::Error::from(e)));
-        let process_response = move |res: Response| {
-            let code = res.status();
-
-            if code == StatusCode::NotFound {
-                return Either::A(future::ok((url, None)));
-            }
-
-            if !code.is_success() {
-                return Either::A(future::err(Error::from(ErrorKind::Http(url, code))));
-            }
-
-            // Determine the encoding. Uses the provided encoding or an encoding computed
-            // from the response headers.
-            let encoding = match encoding.or_else(|| compute_encoding(res.headers())) {
-                Some(e) => e,
-                None => {
-                    return Either::A(future::err(
-                        ErrorKind::UnsupportedEncoding(
-                            url,
-                            res.headers().get::<ContentEncoding>().cloned(),
-                        )
-                        .into(),
-                    ))
-                }
-            };
-
-            let content = self.timer.timeout_stream(
-                res.body().map_err(Error::from),
-                Duration::from_millis(RESPONSE_TIMEOUT_MS),
-            );
-
-            use self::SupportedEncoding::*;
-            let decoded = match encoding {
-                Xz => {
-                    let result = content
-                        .fold(
-                            (url, XzDecoder::new(Vec::new())),
-                            move |(url, mut decoder), chunk| {
-                                decoder
-                                    .write_all(&chunk)
-                                    .chain_err(|| ErrorKind::Decode(url.clone()))
-                                    .map(move |_| (url, decoder))
-                            },
-                        )
-                        .and_then(|(url, mut d)| {
-                            d.finish()
-                                .chain_err(|| ErrorKind::Decode(url.clone()))
-                                .map(move |v| (url, v))
-                        });
-
-                    Either::A(result)
-                }
-
-                Brotli => {
-                    let result = content
-                        .fold(
-                            (url, BrotliDecoder::new(Vec::new())),
-                            move |(url, mut decoder), chunk| {
-                                decoder
-                                    .write_all(&chunk)
-                                    .chain_err(|| ErrorKind::Decode(url.clone()))
-                                    .map(move |_| (url, decoder))
-                            },
-                        )
-                        .and_then(|(url, mut d)| {
-                            d.finish()
-                                .chain_err(|| ErrorKind::Decode(url.clone()))
-                                .map(move |v| (url, v))
-                        });
-
-                    Either::B(Either::A(result))
-                }
-
-                Identity => {
-                    let result = content
-                        .fold(Vec::new(), |mut v, chunk| {
-                            v.extend_from_slice(&chunk);
-                            Ok(v) as Result<_>
-                        })
-                        .map(move |r| (url, r));
-                    Either::B(Either::B(result))
-                }
-            };
-
-            Either::B(decoded.map(|(url, v)| (url, Some(v))))
-        };
-
-        let make_request = move |u| {
-            let mut request = Request::new(Method::Get, u);
-            request.headers_mut().set(AcceptEncoding(vec![
-                qitem(Encoding::Brotli),
-                qitem(Encoding::Gzip),
-                qitem(Encoding::Deflate),
-            ]));
-            self.timer.timeout(
-                self.client.request(request).from_err(),
-                Duration::from_millis(CONNECT_TIMEOUT_MS),
+    ) -> Result<(String, Option<Vec<u8>>)> {
+        let uri = Uri::from_str(&url).expect("url passed to fetch must be valid");
+        let request = Request::get(uri)
+            .header(
+                hyper::header::ACCEPT_ENCODING,
+                HeaderValue::from_static("br, gzip, deflate"),
             )
+            .body(Body::empty())
+            .expect("hyper HTTP request is valid");
+
+        let res = timeout(
+            Duration::from_millis(CONNECT_TIMEOUT_MS),
+            self.client.request(request),
+        )
+        .await??;
+
+        let code = res.status();
+
+        if code == StatusCode::NOT_FOUND {
+            return Ok((url, None));
+        }
+
+        if !code.is_success() {
+            return Err(Error::from(ErrorKind::Http(url, code)));
+        }
+
+        // Determine the encoding. Uses the provided encoding or an encoding computed
+        // from the response headers.
+        let encoding = encoding.map(Ok).unwrap_or_else(|| {
+            compute_encoding(res.headers())
+                .map_err(|e| ErrorKind::UnsupportedEncoding(url.clone(), Some(e)))
+        })?;
+
+        let mut content = Box::pin(
+            res.into_body()
+                .timeout(Duration::from_millis(RESPONSE_TIMEOUT_MS)),
+        );
+
+        use self::SupportedEncoding::*;
+        let decoded = match encoding {
+            Xz => {
+                let mut decoder = XzDecoder::new(Vec::new());
+                while let Some(v) = content.next().await {
+                    let v = v.map_err(|_e| ErrorKind::Timeout)??;
+                    decoder
+                        .write_all(&v)
+                        .chain_err(|| ErrorKind::Decode(url.clone()))?;
+                }
+
+                decoder
+                    .finish()
+                    .chain_err(|| ErrorKind::Decode(url.clone()))?
+            }
+
+            Brotli => {
+                let mut decoder = BrotliDecoder::new(Vec::new());
+                while let Some(v) = content.next().await {
+                    let v = v.map_err(|_e| ErrorKind::Timeout)??;
+                    decoder
+                        .write_all(&v)
+                        .chain_err(|| ErrorKind::Decode(url.clone()))?;
+                }
+
+                decoder
+                    .finish()
+                    .chain_err(|| ErrorKind::Decode(url.clone()))?
+            }
+
+            Identity => {
+                let mut out = Vec::new();
+                while let Some(v) = content.next().await {
+                    let v = v.map_err(|_e| ErrorKind::Timeout)??;
+                    out.extend_from_slice(&v);
+                }
+                out
+            }
         };
 
-        Box::new(
-            future::result(uri)
-                .and_then(make_request)
-                .and_then(process_response),
-        )
+        return Ok((url, Some(decoded)));
     }
 
     /// Fetches the references of a given store path.
@@ -453,7 +400,10 @@ impl Fetcher {
             Ok((path, Some(result)))
         };
 
-        Box::new(self.fetch(url, None).and_then(parse_response))
+        Box::pin(
+            self.fetch(url, None)
+                .and_then(|r| future::ready(parse_response(r))),
+        )
     }
 
     /// Fetches the file listing for the given store path.
@@ -462,7 +412,7 @@ impl Fetcher {
     pub fn fetch_files<'a>(
         &'a self,
         path: &StorePath,
-    ) -> Box<dyn Future<Item = Option<FileTree>, Error = Error> + 'a> {
+    ) -> Pin<Box<dyn Future<Output = Result<Option<FileTree>>> + 'a>> {
         let url_xz = format!("{}/{}.ls.xz", self.cache_url, path.hash());
         let url_generic = format!("{}/{}.ls", self.cache_url, path.hash());
         let name = format!("{}.json", path.hash());
@@ -470,8 +420,8 @@ impl Fetcher {
         let fetched = self
             .fetch(url_generic, None)
             .and_then(move |(url, r)| match r {
-                Some(v) => Either::A(future::ok((url, Some(v)))),
-                None => Either::B(self.fetch(url_xz, Some(SupportedEncoding::Xz))),
+                Some(v) => Either::Left(future::ok((url, Some(v)))),
+                None => Either::Right(self.fetch(url_xz, Some(SupportedEncoding::Xz))),
             });
 
         let parse_response = move |(url, res)| {
@@ -516,7 +466,10 @@ impl Fetcher {
             Ok(Some(response.root.0))
         };
 
-        Box::new(fetched.and_then(parse_response))
+        Box::pin(fetched.and_then(move |v| {
+            let parse_result = parse_response(v);
+            future::ready(parse_result)
+        }))
     }
 }
 
@@ -541,17 +494,29 @@ enum SupportedEncoding {
 ///
 /// If there is no `Content-Encoding` header we assume that the content is encoded with
 /// the `Identity` variant (i.e. there is no compression at all).
-fn compute_encoding(headers: &Headers) -> Option<SupportedEncoding> {
-    let empty = ContentEncoding(vec![]);
-    let &ContentEncoding(ref encodings) = headers.get::<ContentEncoding>().unwrap_or(&empty);
+fn compute_encoding(
+    headers: &hyper::HeaderMap
+) -> ::std::result::Result<SupportedEncoding, String> {
+    let encodings: Vec<_> = headers
+        .get_all(hyper::header::CONTENT_ENCODING)
+        .into_iter()
+        .flat_map(|v| v.as_bytes().split(|c| *c == b','))
+        .collect();
 
-    let identity = Encoding::Identity;
-    let encoding = encodings.get(0).unwrap_or(&identity);
-    match *encoding {
-        Encoding::Brotli => Some(SupportedEncoding::Brotli),
-        Encoding::Identity => Some(SupportedEncoding::Identity),
-        Encoding::EncodingExt(ref ext) if ext == "xz" => Some(SupportedEncoding::Xz),
-        _ => None,
+    if encodings.len() > 1 {
+        return Err(String::from_utf8_lossy(&encodings.join(&b", "[..])).into_owned());
+    }
+
+    let encoding = match encodings.get(0) {
+        None => return Ok(SupportedEncoding::Identity),
+        Some(v) => *v,
+    };
+
+    match encoding {
+        b"br" => Ok(SupportedEncoding::Brotli),
+        b"identity" | b"" => Ok(SupportedEncoding::Identity),
+        b"xz" => Ok(SupportedEncoding::Xz),
+        _ => Err(String::from_utf8_lossy(&encodings.join(&b", "[..])).into_owned()),
     }
 }
 
@@ -650,7 +615,6 @@ impl<'de> Deserialize<'de> for HydraFileListing {
 
                 // the type field must always be present so we know which type to expect
                 let typ: &[u8] = &*typ.ok_or_else(|| serde::de::Error::missing_field("type"))?;
-
 
                 match typ {
                     b"regular" => {

@@ -6,9 +6,7 @@ extern crate futures;
 extern crate hyper;
 extern crate nix_index;
 extern crate separator;
-extern crate tokio_core;
 extern crate tokio_retry;
-extern crate tokio_timer;
 extern crate void;
 extern crate xdg;
 #[macro_use]
@@ -18,17 +16,18 @@ extern crate stderr;
 
 use clap::{App, Arg, ArgMatches};
 use error_chain::ChainedError;
-use futures::future;
+use futures::{future, FutureExt, StreamExt, TryFutureExt, TryStreamExt};
 use futures::{Future, Stream};
 use separator::Separatable;
 use std::fs::{self, File};
 use std::io::{self, Write};
 use std::iter::FromIterator;
 use std::path::PathBuf;
+use std::pin::Pin;
 use std::process;
 use std::result;
 use std::str;
-use tokio_core::reactor::Core;
+use tokio::runtime::Runtime;
 use void::ResultVoidExt;
 
 use nix_index::database;
@@ -89,7 +88,7 @@ error_chain! {
 /// If a store path has no file listing (for example, because it is not built by hydra),
 /// the file listing will be `None` instead.
 type FileListingStream<'a> =
-    Box<dyn Stream<Item = Option<(StorePath, FileTree)>, Error = Error> + 'a>;
+    Pin<Box<dyn Stream<Item = Result<Option<(StorePath, FileTree)>>> + 'a>>;
 
 /// Fetches all the file listings for the full closure of the given starting set of path.
 ///
@@ -120,23 +119,22 @@ fn fetch_file_listings(
                         let hash = reference.hash().into_owned();
                         handle.add_work(hash, reference);
                     }
-                    future::Either::B(fetcher.fetch_files(&path).then(move |r| match r {
+                    future::Either::Left(fetcher.fetch_files(&path).map(move |r| match r {
                         Err(e) => Err(Error::with_chain(e, ErrorKind::FetchFiles(path))),
                         Ok(Some(files)) => Ok(Some((path, files))),
                         Ok(None) => Ok(None),
                     }))
                 }
-                None => future::Either::A(future::ok(None)),
+                None => future::Either::Right(future::ok(None)),
             })
     };
 
     // Process all paths in the queue, until the queue becomes empty.
     let watch = workset.watch();
     let stream = workset
-        .then(|r| future::ok(r.void_unwrap()))
         .map(move |(handle, path)| process(handle, path))
         .buffer_unordered(jobs);
-    (Box::new(stream), watch)
+    (Box::pin(stream), watch)
 }
 
 /// Tries to load the file listings for all paths from a cache file named `paths.cache`.
@@ -159,12 +157,12 @@ fn try_load_paths_cache() -> Result<Option<(FileListingStream<'static>, WorkSetW
             .map(|(path, tree)| (path.hash().to_string(), Some((path, tree)))),
     );
     let watch = workset.watch();
-    let stream = workset.then(|r| {
-        let (_handle, v) = r.void_unwrap();
-        future::ok(v)
+    let stream = workset.map(|r| {
+        let (_handle, v) = r;
+        Ok(v)
     });
 
-    Ok(Some((Box::new(stream), watch)))
+    Ok(Some((Box::pin(stream), watch)))
 }
 
 /// A struct holding the processed arguments for database creation.
@@ -180,14 +178,14 @@ struct Args {
 /// The main function of this module: creates a new nix-index database.
 fn update_index(
     args: &Args,
-    lp: &mut Core,
+    lp: &mut Runtime,
 ) -> Result<()> {
     errstln!("+ querying available packages");
     // first try to load the paths.cache if requested, otherwise query
     // the packages normally. Also fall back to normal querying if the paths.cache
     // fails to load.
-    let fetcher =
-        Fetcher::new(CACHE_URL.to_string(), lp.handle()).map_err(|e| ErrorKind::ParseProxy(e))?;
+    let fetcher = Fetcher::new(CACHE_URL.to_string(), lp.handle().clone())
+        .map_err(|e| ErrorKind::ParseProxy(e))?;
     let query = || -> Result<_> {
         if args.path_cache {
             if let Some(cached) = try_load_paths_cache()? {
@@ -230,12 +228,12 @@ fn update_index(
     // Treat request errors as if the file list were missing
     let requests = requests.or_else(|e| {
         errst!("\n{}", e.display_chain());
-        Ok(None)
+        future::ready(Ok(None))
     });
 
     // Add progress output
     let (mut indexed, mut missing) = (0, 0);
-    let requests = requests.inspect(|entry| {
+    let requests = requests.inspect_ok(|entry| {
         if entry.is_some() {
             indexed += 1;
         } else {
@@ -248,7 +246,7 @@ fn update_index(
     });
 
     // Filter packages with no file listings available
-    let requests = requests.filter_map(|entry| entry);
+    let requests = requests.try_filter_map(|entry| future::ok(entry));
 
     errst!("+ generating index\r");
     fs::create_dir_all(&args.database)
@@ -257,14 +255,17 @@ fn update_index(
         .chain_err(|| ErrorKind::CreateDatabase(args.database.clone()))?;
 
     let mut results: Vec<(StorePath, FileTree)> = Vec::new();
-    lp.run(requests.for_each(|entry| -> Result<_> {
-        if args.path_cache {
-            results.push(entry.clone());
-        }
-        let (path, files) = entry;
-        db.add(path, files)
-            .chain_err(|| ErrorKind::WriteDatabase(args.database.clone()))?;
-        Ok(())
+    lp.block_on(requests.try_for_each(|entry| {
+        let doit = || -> Result<_> {
+            if args.path_cache {
+                results.push(entry.clone());
+            }
+            let (path, files) = entry;
+            db.add(path, files)
+                .chain_err(|| ErrorKind::WriteDatabase(args.database.clone()))?;
+            Ok(())
+        };
+        future::ready(doit())
     }))?;
     errstln!("");
 
@@ -304,7 +305,7 @@ fn process_args(matches: &ArgMatches) -> result::Result<Args, clap::Error> {
 }
 
 fn main() {
-    let mut lp = Core::new().unwrap();
+    let mut lp = Runtime::new().unwrap();
 
     let base = xdg::BaseDirectories::with_prefix("nix-index").unwrap();
     let cache_dir = base.get_cache_home();

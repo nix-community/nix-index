@@ -1,20 +1,20 @@
+use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
+use grep::{self, Grep, GrepBuilder, Match};
+use regex::bytes::Regex;
+use regex_syntax::Expr;
+use serde_json;
+use std::fs::File;
 /// Creating and searching file databases.
 ///
 /// This module implements an abstraction for creating an index of files with meta information
 /// and searching that index for paths matching a specific pattern.
-use std::io::{self, Read, Write, BufWriter, BufReader, Seek, SeekFrom};
-use std::fs::File;
+use std::io::{self, BufReader, BufWriter, Read, Seek, SeekFrom, Write};
 use std::path::Path;
 use zstd;
-use grep::{self, Grep, Match, GrepBuilder};
-use regex_syntax::Expr;
-use regex::bytes::Regex;
-use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
-use serde_json;
 
-use crate::package::StorePath;
 use crate::files::{FileTree, FileTreeEntry};
 use crate::frcode;
+use crate::package::StorePath;
 
 /// The version of the database format supported by this nix-index version.
 ///
@@ -46,18 +46,27 @@ impl Drop for Writer {
 impl Writer {
     /// Creates a new database at the given path with the specified zstd compression level
     /// (currently, supported values range from 0 to 22).
-    pub fn create<P: AsRef<Path>>(path: P, level: i32) -> io::Result<Writer> {
+    pub fn create<P: AsRef<Path>>(
+        path: P,
+        level: i32,
+    ) -> io::Result<Writer> {
         let mut file = File::create(path)?;
         file.write_all(FILE_MAGIC)?;
         file.write_u64::<LittleEndian>(FORMAT_VERSION)?;
         let encoder = zstd::Encoder::new(file, level)?;
 
-        Ok(Writer { writer: Some(BufWriter::new(encoder)) })
+        Ok(Writer {
+            writer: Some(BufWriter::new(encoder)),
+        })
     }
 
     /// Add a new package to the database for the given store path with its corresponding
     /// file tree.
-    pub fn add(&mut self, path: StorePath, files: FileTree) -> io::Result<()> {
+    pub fn add(
+        &mut self,
+        path: StorePath,
+        files: FileTree,
+    ) -> io::Result<()> {
         let writer = self.writer.as_mut().expect("not dropped yet");
         let mut encoder =
             frcode::Encoder::new(writer, b"p".to_vec(), serde_json::to_vec(&path).unwrap());
@@ -126,7 +135,7 @@ impl From<frcode::Error> for Error {
 
 /// A Reader allows fast querying of a nix-index database.
 pub struct Reader {
-    decoder: frcode::Decoder<BufReader<zstd::Decoder<File>>>,
+    decoder: frcode::Decoder<BufReader<zstd::Decoder<BufReader<File>>>>,
 }
 
 impl Reader {
