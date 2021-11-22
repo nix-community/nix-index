@@ -2,11 +2,11 @@
 //!
 //! The main type here is `FileTree` which represents
 //! such as the file listing for a store path.
-use std::collections::HashMap;
-use serde_bytes::ByteBuf;
-use std::str;
-use std::io::{self, Write};
 use memchr::memchr;
+use serde_bytes::ByteBuf;
+use std::collections::HashMap;
+use std::io::{self, Write};
+use std::str;
 
 use crate::frcode;
 
@@ -78,32 +78,35 @@ impl<T> FileNode<T> {
     pub fn split_contents(&self) -> (FileNode<()>, Option<&T>) {
         use self::FileNode::*;
         match *self {
-            Regular { size, executable } => {
-                (
-                    Regular {
-                        size: size,
-                        executable: executable,
-                    },
-                    None,
-                )
-            }
-            Symlink { ref target } => (Symlink { target: target.clone() }, None),
-            Directory { size, ref contents } => {
-                (
-                    Directory {
-                        size: size,
-                        contents: (),
-                    },
-                    Some(contents),
-                )
-            }
+            Regular { size, executable } => (
+                Regular {
+                    size: size,
+                    executable: executable,
+                },
+                None,
+            ),
+            Symlink { ref target } => (
+                Symlink {
+                    target: target.clone(),
+                },
+                None,
+            ),
+            Directory { size, ref contents } => (
+                Directory {
+                    size: size,
+                    contents: (),
+                },
+                Some(contents),
+            ),
         }
     }
 
     /// Return the type of this file.
     pub fn get_type(&self) -> FileType {
         match *self {
-            FileNode::Regular { executable, .. } => FileType::Regular { executable: executable },
+            FileNode::Regular { executable, .. } => FileType::Regular {
+                executable: executable,
+            },
             FileNode::Directory { .. } => FileType::Directory,
             FileNode::Symlink { .. } => FileType::Symlink,
         }
@@ -122,7 +125,7 @@ impl FileNode<()> {
                 encoder.write_meta(target)?;
                 encoder.write_meta(b"s")?;
             }
-            Directory { size, contents: () }=> {
+            Directory { size, contents: () } => {
                 encoder.write_meta(format!("{}d", size).as_bytes())?;
             }
         }
@@ -134,26 +137,24 @@ impl FileNode<()> {
         buf.split_last().and_then(|(kind, buf)| match *kind {
             b'x' | b'r' => {
                 let executable = *kind == b'x';
-                str::from_utf8(buf).ok().and_then(|s| s.parse().ok()).map(
-                    |size| {
-                        Regular {
-                            executable: executable,
-                            size: size,
-                        }
-                    },
-                )
+                str::from_utf8(buf)
+                    .ok()
+                    .and_then(|s| s.parse().ok())
+                    .map(|size| Regular {
+                        executable: executable,
+                        size: size,
+                    })
             }
-            b's' => Some(Symlink { target: ByteBuf::from(buf) }),
-            b'd' => {
-                str::from_utf8(buf).ok().and_then(|s| s.parse().ok()).map(
-                    |size| {
-                        Directory {
-                            size: size,
-                            contents: (),
-                        }
-                    },
-                )
-            }
+            b's' => Some(Symlink {
+                target: ByteBuf::from(buf),
+            }),
+            b'd' => str::from_utf8(buf)
+                .ok()
+                .and_then(|s| s.parse().ok())
+                .map(|size| Directory {
+                    size: size,
+                    contents: (),
+                }),
             _ => None,
         })
     }
@@ -186,11 +187,9 @@ impl FileTreeEntry {
         memchr(b'\0', buf).and_then(|sep| {
             let path = &buf[(sep + 1)..];
             let node = &buf[0..sep];
-            FileNode::decode(node).map(|node| {
-                FileTreeEntry {
-                    path: path.to_vec(),
-                    node: node,
-                }
+            FileNode::decode(node).map(|node| FileTreeEntry {
+                path: path.to_vec(),
+                node: node,
             })
         })
     }

@@ -155,20 +155,20 @@ struct WorkSetObserverImpl<K, V> {
 
 impl<K, V> WorkSetObserver for WorkSetObserverImpl<K, V> {
     fn queue_len(&self) -> usize {
-        self.state.upgrade().map_or(
-            0,
-            |shared: Rc<RefCell<Shared<K, V>>>| {
+        self.state
+            .upgrade()
+            .map_or(0, |shared: Rc<RefCell<Shared<K, V>>>| {
                 shared.as_ref().borrow().queue.len()
-            },
-        )
+            })
     }
 }
-
 
 impl<K: Hash + Eq + 'static, V: 'static> WorkSet<K, V> {
     /// Returns a watch for this work set that provides status information.
     pub fn watch(&self) -> WorkSetWatch {
-        Box::new(WorkSetObserverImpl { state: Rc::downgrade(&self.state) })
+        Box::new(WorkSetObserverImpl {
+            state: Rc::downgrade(&self.state),
+        })
     }
 }
 
@@ -179,7 +179,9 @@ impl<K: Hash + Eq + 'static, V: 'static> FromIterator<(K, V)> for WorkSet<K, V> 
             seen: HashSet::new(),
             queue: OrderMap::from_iter(iter),
         };
-        WorkSet { state: Rc::new(RefCell::new(shared)) }
+        WorkSet {
+            state: Rc::new(RefCell::new(shared)),
+        }
     }
 }
 
@@ -192,10 +194,7 @@ impl<K: Hash + Eq + 'static, V: 'static> FromIterator<(K, V)> for WorkSet<K, V> 
 impl<K: Hash + Eq, V> Stream for WorkSet<K, V> {
     type Item = (WorkSetHandle<K, V>, V);
 
-    fn poll_next(
-        self: Pin<&mut Self>,
-        _cx: &mut Context<'_>,
-    ) -> Poll<Option<Self::Item>> {
+    fn poll_next(self: Pin<&mut Self>, _cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
         let (k, v) = match self.state.borrow_mut().queue.pop() {
             Some(e) => e,
             None => {

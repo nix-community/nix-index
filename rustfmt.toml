@@ -1,5 +1,0 @@
-fn_args_layout = "Vertical"
-array_layout = "Block"
-generics_indent = "Block"
-write_mode = "Overwrite"
-closure_block_indent_threshold = 1

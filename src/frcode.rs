@@ -52,12 +52,12 @@
 //! The last entry shares four bytes less than the second to last one did with its predecessor, so here the differential is negative.
 //!
 //! Through this encoding, the size of the index is typically reduces by a factor of 3 to 5.
-use std::io::{self, Write, BufRead};
-use std::cmp;
-use std::ops::{Deref, DerefMut};
 use memchr;
+use std::cmp;
+use std::io::{self, BufRead, Write};
+use std::ops::{Deref, DerefMut};
 
-error_chain!{
+error_chain! {
     foreign_links {
         Io(io::Error);
     }
@@ -69,7 +69,7 @@ error_chain!{
         SharedOverflow { shared_len: isize, diff: isize } {
             description("shared prefix length too big (overflow)")
             display("length of shared prefix too big: cannot add {} to {} without overflow", shared_len, diff)
-        } 
+        }
         MissingNul {
             description("missing terminating NUL byte for entry")
         }
@@ -186,7 +186,6 @@ impl<R: BufRead> Decoder<R> {
             return Ok(false);
         }
 
-
         if self.shared_len < 0 || self.last_path + shared_len > self.pos {
             bail!(ErrorKind::SharedOutOfRange {
                 previous_len: self.pos - self.last_path,
@@ -248,7 +247,6 @@ impl<R: BufRead> Decoder<R> {
             if done {
                 return Ok(true);
             }
-
         }
     }
 
@@ -256,17 +254,17 @@ impl<R: BufRead> Decoder<R> {
     /// if the end of input has been reached.
     fn decode_prefix_diff(&mut self) -> Result<i16> {
         let mut buf = [0; 1];
-        self.reader.read_exact(&mut buf).chain_err(|| {
-            ErrorKind::MissingPrefixDifferential
-        })?;
+        self.reader
+            .read_exact(&mut buf)
+            .chain_err(|| ErrorKind::MissingPrefixDifferential)?;
 
         if buf[0] != 0x80 {
             Ok((buf[0] as i8) as i16)
         } else {
             let mut buf = [0; 2];
-            self.reader.read_exact(&mut buf).chain_err(|| {
-                ErrorKind::MissingPrefixDifferential
-            })?;
+            self.reader
+                .read_exact(&mut buf)
+                .chain_err(|| ErrorKind::MissingPrefixDifferential)?;
             let high = buf[0] as i16;
             let low = buf[1] as i16;
             Ok(high << 8 | low)
@@ -357,12 +355,13 @@ impl<R: BufRead> Decoder<R> {
             let diff = self.decode_prefix_diff()? as isize;
 
             // Update the shared len
-            self.shared_len = self.shared_len.checked_add(diff).ok_or_else(|| {
-                ErrorKind::SharedOverflow {
-                    shared_len: self.shared_len,
-                    diff: diff,
-                }
-            })?;
+            self.shared_len =
+                self.shared_len
+                    .checked_add(diff)
+                    .ok_or_else(|| ErrorKind::SharedOverflow {
+                        shared_len: self.shared_len,
+                        diff: diff,
+                    })?;
 
             // Copy the shared prefix
             if !self.copy_shared()? {
@@ -371,11 +370,9 @@ impl<R: BufRead> Decoder<R> {
         }
 
         // Since we don't want to return partially decoded items, we need to find the end of the last entry.
-        self.partial_entry_start = memchr::memrchr(b'\n', &self.buf[..self.pos]).ok_or_else(
-            || {
-                ErrorKind::MissingNewline
-            },
-        )? + 1;
+        self.partial_entry_start = memchr::memrchr(b'\n', &self.buf[..self.pos])
+            .ok_or_else(|| ErrorKind::MissingNewline)?
+            + 1;
         Ok(&mut self.buf[item_start..self.partial_entry_start])
     }
 }

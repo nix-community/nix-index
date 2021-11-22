@@ -3,8 +3,8 @@
 //! The main data type in this `StorePath`, which represents a single output of
 //! some nix derivation. We also sometimes call a `StorePath` a package, to avoid
 //! confusion with file paths.
-use std::io::{self, Write};
 use std::borrow::Cow;
+use std::io::{self, Write};
 use std::str;
 
 /// A type for describing how to reach a given store path.
@@ -179,15 +179,15 @@ impl StorePath {
 
     pub fn decode(buf: &[u8]) -> Option<StorePath> {
         let mut parts = buf.splitn(2, |c| *c == b'\n');
-        parts.next().and_then(|v| str::from_utf8(v).ok()).and_then(
-            |path| {
-                parts.next().and_then(PathOrigin::decode).and_then(
-                    |origin| {
-                        StorePath::parse(origin, path)
-                    },
-                )
-            },
-        )
+        parts
+            .next()
+            .and_then(|v| str::from_utf8(v).ok())
+            .and_then(|path| {
+                parts
+                    .next()
+                    .and_then(PathOrigin::decode)
+                    .and_then(|origin| StorePath::parse(origin, path))
+            })
     }
 
     /// Returns the name of the store path, which is the part of the file name that

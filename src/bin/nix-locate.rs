@@ -1,30 +1,30 @@
 //! Tool for searching for files in nixpkgs packages
 #[macro_use]
 extern crate clap;
+extern crate ansi_term;
 extern crate grep;
+extern crate isatty;
 extern crate nix_index;
+extern crate regex;
 extern crate separator;
 extern crate xdg;
-extern crate regex;
-extern crate isatty;
-extern crate ansi_term;
 #[macro_use]
 extern crate error_chain;
 #[macro_use]
 extern crate stderr;
 
-use std::path::PathBuf;
-use std::result;
-use std::process;
-use std::str;
-use std::collections::HashSet;
-use separator::Separatable;
-use clap::{Arg, App, ArgMatches};
-use regex::bytes::Regex;
 use ansi_term::Colour::Red;
+use clap::{App, Arg, ArgMatches};
+use regex::bytes::Regex;
+use separator::Separatable;
+use std::collections::HashSet;
+use std::path::PathBuf;
+use std::process;
+use std::result;
+use std::str;
 
 use nix_index::database;
-use nix_index::files::{self, FileType, FileTreeEntry};
+use nix_index::files::{self, FileTreeEntry, FileType};
 
 error_chain! {
     errors {
@@ -59,9 +59,7 @@ struct Args {
 /// The main function of this module: searches with the given options in the database.
 fn locate(args: &Args) -> Result<()> {
     // Build the regular expression matcher
-    let pattern = Regex::new(&args.pattern).chain_err(|| {
-        ErrorKind::Grep(args.pattern.clone())
-    })?;
+    let pattern = Regex::new(&args.pattern).chain_err(|| ErrorKind::Grep(args.pattern.clone()))?;
     let package_pattern = if let Some(ref pat) = args.package_pattern {
         Some(Regex::new(pat).chain_err(|| ErrorKind::Grep(pat.clone()))?)
     } else {
@@ -70,11 +68,11 @@ fn locate(args: &Args) -> Result<()> {
 
     // Open the database
     let index_file = args.database.join("files");
-    let db = database::Reader::open(&index_file).chain_err(|| {
-        ErrorKind::ReadDatabase(index_file.clone())
-    })?;
+    let db = database::Reader::open(&index_file)
+        .chain_err(|| ErrorKind::ReadDatabase(index_file.clone()))?;
 
-    let results = db.query(&pattern)
+    let results = db
+        .query(&pattern)
         .package_pattern(package_pattern.as_ref())
         .hash(args.hash.clone())
         .run()
@@ -82,9 +80,10 @@ fn locate(args: &Args) -> Result<()> {
         .filter(|v| {
             v.as_ref().ok().map_or(true, |v| {
                 let &(ref store_path, FileTreeEntry { ref path, ref node }) = v;
-                let m = pattern.find_iter(path).last().expect(
-                    "path should match the pattern",
-                );
+                let m = pattern
+                    .find_iter(path)
+                    .last()
+                    .expect("path should match the pattern");
 
                 let conditions = [
                     !args.group || !path[m.end()..].contains(&b'/'),
@@ -104,7 +103,7 @@ fn locate(args: &Args) -> Result<()> {
         use crate::files::FileNode::*;
         let (typ, size) = match node {
             Regular { executable, size } => (if executable { "x" } else { "r" }, size),
-            Directory { size, contents: () }=> ("d", size),
+            Directory { size, contents: () } => ("d", size),
             Symlink { .. } => ("s", 0),
         };
 
@@ -200,20 +199,30 @@ fn process_args(matches: &ArgMatches) -> result::Result<Args, clap::Error> {
         unreachable!("color can only be auto, always or never (verified by clap already)")
     });
     let args = Args {
-        database: PathBuf::from(matches.value_of("database").expect("database has default value by clap")),
+        database: PathBuf::from(
+            matches
+                .value_of("database")
+                .expect("database has default value by clap"),
+        ),
         group: !matches.is_present("no-group"),
         pattern: make_pattern(&pattern_arg, true),
         package_pattern: package_arg.map(|p| make_pattern(p, false)),
         hash: matches.value_of("hash").map(str::to_string),
-        file_type: matches.values_of("type").map_or(files::ALL_FILE_TYPES.to_vec(), |types| {
-            types.map(|t| match t {
-                "x" => FileType::Regular { executable: true },
-                "r" => FileType::Regular { executable: false },
-                "s" => FileType::Symlink,
-                "d" => FileType::Directory,
-                _ => unreachable!("file type can only be one of x, r, s and d (verified by clap already)"),
-            }).collect()
-        }),
+        file_type: matches
+            .values_of("type")
+            .map_or(files::ALL_FILE_TYPES.to_vec(), |types| {
+                types
+                    .map(|t| match t {
+                        "x" => FileType::Regular { executable: true },
+                        "r" => FileType::Regular { executable: false },
+                        "s" => FileType::Symlink,
+                        "d" => FileType::Directory,
+                        _ => unreachable!(
+                            "file type can only be one of x, r, s and d (verified by clap already)"
+                        ),
+                    })
+                    .collect()
+            }),
         only_toplevel: matches.is_present("toplevel"),
         color: color.unwrap_or_else(isatty::stdout_isatty),
         minimal: matches.is_present("minimal"),
@@ -331,7 +340,6 @@ fn main() {
              ))
         .after_help(LONG_USAGE)
         .get_matches();
-
 
     let args = process_args(&matches).unwrap_or_else(|e| e.exit());
 

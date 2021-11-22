@@ -173,10 +173,7 @@ impl Client {
         }
     }
 
-    pub fn request(
-        &self,
-        req: hyper::Request<hyper::Body>,
-    ) -> hyper::client::ResponseFuture {
+    pub fn request(&self, req: hyper::Request<hyper::Body>) -> hyper::client::ResponseFuture {
         let mut req = req;
         match self {
             Client::Proxy(client, connector) => {
@@ -214,9 +211,7 @@ impl Fetcher {
     /// The `handle` argument is a Handle to the tokio event loop.
     ///
     /// `cache_url` specifies the URL of the binary cache (example: `https://cache.nixos.org`).
-    pub fn new(
-        cache_url: String,
-    ) -> Result<Fetcher> {
+    pub fn new(cache_url: String) -> Result<Fetcher> {
         let client = Client::new()?;
         Ok(Fetcher {
             client: client,
@@ -491,7 +486,7 @@ enum SupportedEncoding {
 /// If there is no `Content-Encoding` header we assume that the content is encoded with
 /// the `Identity` variant (i.e. there is no compression at all).
 fn compute_encoding(
-    headers: &hyper::HeaderMap
+    headers: &hyper::HeaderMap,
 ) -> ::std::result::Result<SupportedEncoding, String> {
     let encodings: Vec<_> = headers
         .get_all(hyper::header::CONTENT_ENCODING)
@@ -547,10 +542,7 @@ impl<'de> Deserialize<'de> for HydraFileListing {
         impl<'de> Visitor<'de> for Root {
             type Value = FileTree;
 
-            fn expecting(
-                &self,
-                f: &mut fmt::Formatter,
-            ) -> fmt::Result {
+            fn expecting(&self, f: &mut fmt::Formatter) -> fmt::Result {
                 write!(f, "a file listing (map)")
             }
 

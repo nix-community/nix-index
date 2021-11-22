@@ -1,8 +1,8 @@
 //! Small but reusable helper functions.
+use std::env;
+use std::fs::OpenOptions;
 use std::io::{self, Write};
 use std::path::PathBuf;
-use std::fs::OpenOptions;
-use std::env;
 
 /// Writes a file to the temp directory with a name that is made of the supplied
 /// base and a suffix if a file with that name already exists.
@@ -18,9 +18,10 @@ pub fn write_temp_file(base_name: &str, contents: &[u8]) -> Option<PathBuf> {
         } else {
             this_path.push(format!("{}.{}", base_name, i));
         }
-        let temp_file = OpenOptions::new().write(true).create_new(true).open(
-            &this_path,
-        );
+        let temp_file = OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&this_path);
         match temp_file {
             Ok(mut file) => {
                 path = file.write_all(contents).map(|_| this_path).ok();
