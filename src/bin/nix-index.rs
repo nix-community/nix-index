@@ -16,8 +16,7 @@ extern crate stderr;
 
 use clap::{App, Arg, ArgMatches};
 use error_chain::ChainedError;
-use futures::{future, FutureExt, StreamExt, TryFutureExt, TryStreamExt};
-use futures::{Future, Stream};
+use futures::{future, FutureExt, StreamExt, TryFutureExt, TryStreamExt, Stream};
 use separator::Separatable;
 use std::fs::{self, File};
 use std::io::{self, Write};
@@ -28,7 +27,6 @@ use std::process;
 use std::result;
 use std::str;
 use tokio::runtime::Runtime;
-use void::ResultVoidExt;
 
 use nix_index::database;
 use nix_index::files::FileTree;
@@ -184,7 +182,7 @@ fn update_index(
     // first try to load the paths.cache if requested, otherwise query
     // the packages normally. Also fall back to normal querying if the paths.cache
     // fails to load.
-    let fetcher = Fetcher::new(CACHE_URL.to_string(), lp.handle().clone())
+    let fetcher = Fetcher::new(CACHE_URL.to_string())
         .map_err(|e| ErrorKind::ParseProxy(e))?;
     let query = || -> Result<_> {
         if args.path_cache {

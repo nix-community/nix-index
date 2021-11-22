@@ -24,7 +24,6 @@ use std::pin::Pin;
 use std::result;
 use std::str::{self, FromStr, Utf8Error};
 use std::time::{Duration, Instant};
-use tokio::runtime::Handle;
 use tokio::time::error::Elapsed;
 use tokio::time::timeout;
 use tokio_retry::strategy::ExponentialBackoff;
@@ -98,7 +97,7 @@ enum Client {
 }
 
 impl Client {
-    pub fn new(_handle: &Handle) -> Result<Client> {
+    pub fn new() -> Result<Client> {
         let connector = HttpConnector::new();
         let http_proxy = var("HTTP_PROXY");
 
@@ -201,7 +200,6 @@ impl Client {
 pub struct Fetcher {
     client: Client,
     cache_url: String,
-    handle: Handle,
 }
 
 const RESPONSE_TIMEOUT_MS: u64 = 1000;
@@ -218,13 +216,11 @@ impl Fetcher {
     /// `cache_url` specifies the URL of the binary cache (example: `https://cache.nixos.org`).
     pub fn new(
         cache_url: String,
-        handle: Handle,
     ) -> Result<Fetcher> {
-        let client = Client::new(&handle)?;
+        let client = Client::new()?;
         Ok(Fetcher {
             client: client,
             cache_url: cache_url,
-            handle: handle,
         })
     }
 
