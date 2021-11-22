@@ -16,7 +16,7 @@ extern crate stderr;
 
 use clap::{App, Arg, ArgMatches};
 use error_chain::ChainedError;
-use futures::{future, FutureExt, StreamExt, TryFutureExt, TryStreamExt, Stream};
+use futures::{future, FutureExt, Stream, StreamExt, TryFutureExt};
 use separator::Separatable;
 use std::fs::{self, File};
 use std::io::{self, Write};
@@ -173,63 +173,64 @@ struct Args {
 }
 
 /// The main function of this module: creates a new nix-index database.
-async fn update_index(
-    args: &Args,
-) -> Result<()> {
-    errstln!("+ querying available packages");
+async fn update_index(args: &Args) -> Result<()> {
     // first try to load the paths.cache if requested, otherwise query
     // the packages normally. Also fall back to normal querying if the paths.cache
     // fails to load.
-    let fetcher = Fetcher::new(CACHE_URL.to_string())
-        .map_err(|e| ErrorKind::ParseProxy(e))?;
-    let query = || -> Result<_> {
-        if args.path_cache {
-            if let Some(cached) = try_load_paths_cache()? {
-                return Ok(cached);
-            }
-        }
-
-        // These are the paths that show up in `nix-env -qa`.
-        let normal_paths = nixpkgs::query_packages(&args.nixpkgs, None, args.show_trace);
-
-        // We also add some additional sets that only show up in `nix-env -qa -A someSet`.
-        //
-        // Some of these sets are not build directly by hydra. We still include them here
-        // since parts of these sets may be build as dependencies of other packages
-        // that are build by hydra. This way, our attribute path information is more
-        // accurate.
-        //
-        // We only need sets that are not marked "recurseIntoAttrs" here, since if they are,
-        // they are already part of normal_paths.
-        let extra_scopes = [
-            "xlibs",
-            "haskellPackages",
-            "rPackages",
-            "nodePackages",
-            "coqPackages",
-        ];
-
-        let all_paths = normal_paths.chain(extra_scopes.iter().flat_map(|scope| {
-            nixpkgs::query_packages(&args.nixpkgs, Some(scope), args.show_trace)
-        }));
-
-        let paths: Vec<StorePath> = all_paths
-            .map(|x| x.chain_err(|| ErrorKind::QueryPackages))
-            .collect::<Result<_>>()?;
-
-        Ok(fetch_file_listings(&fetcher, args.jobs, paths.clone()))
+    let cached = if args.path_cache {
+        errstln!("+ loading paths from cache");
+        try_load_paths_cache()?
+    } else {
+        None
     };
-    let (requests, watch) = query()?;
+
+    let fetcher = Fetcher::new(CACHE_URL.to_string()).map_err(|e| ErrorKind::ParseProxy(e))?;
+    let (files, watch) = match cached {
+        Some(v) => v,
+        None => {
+            errstln!("+ querying available packages");
+            // These are the paths that show up in `nix-env -qa`.
+            let normal_paths = nixpkgs::query_packages(&args.nixpkgs, None, args.show_trace);
+
+            // We also add some additional sets that only show up in `nix-env -qa -A someSet`.
+            //
+            // Some of these sets are not build directly by hydra. We still include them here
+            // since parts of these sets may be build as dependencies of other packages
+            // that are build by hydra. This way, our attribute path information is more
+            // accurate.
+            //
+            // We only need sets that are not marked "recurseIntoAttrs" here, since if they are,
+            // they are already part of normal_paths.
+            let extra_scopes = [
+                "xlibs",
+                "haskellPackages",
+                "rPackages",
+                "nodePackages",
+                "coqPackages",
+            ];
+
+            let all_paths = normal_paths.chain(extra_scopes.iter().flat_map(|scope| {
+                nixpkgs::query_packages(&args.nixpkgs, Some(scope), args.show_trace)
+            }));
+
+            let paths: Vec<StorePath> = all_paths
+                .map(|x| x.chain_err(|| ErrorKind::QueryPackages))
+                .collect::<Result<_>>()?;
+            fetch_file_listings(&fetcher, args.jobs, paths.clone())
+        }
+    };
 
     // Treat request errors as if the file list were missing
-    let requests = requests.or_else(|e| {
-        errst!("\n{}", e.display_chain());
-        future::ready(Ok(None))
+    let files = files.map(|r| {
+        r.unwrap_or_else(|e| {
+            errst!("\n{}", e.display_chain());
+            None
+        })
     });
 
     // Add progress output
     let (mut indexed, mut missing) = (0, 0);
-    let requests = requests.inspect_ok(|entry| {
+    let files = files.inspect(|entry| {
         if entry.is_some() {
             indexed += 1;
         } else {
@@ -242,7 +243,7 @@ async fn update_index(
     });
 
     // Filter packages with no file listings available
-    let requests = requests.try_filter_map(|entry| future::ok(entry));
+    let mut files = files.filter_map(|entry| future::ready(entry));
 
     errst!("+ generating index\r");
     fs::create_dir_all(&args.database)
@@ -251,18 +252,14 @@ async fn update_index(
         .chain_err(|| ErrorKind::CreateDatabase(args.database.clone()))?;
 
     let mut results: Vec<(StorePath, FileTree)> = Vec::new();
-    requests.try_for_each(|entry| {
-        let doit = || -> Result<_> {
-            if args.path_cache {
-                results.push(entry.clone());
-            }
-            let (path, files) = entry;
-            db.add(path, files)
-                .chain_err(|| ErrorKind::WriteDatabase(args.database.clone()))?;
-            Ok(())
-        };
-        future::ready(doit())
-    }).await?;
+    while let Some(entry) = files.next().await {
+        if args.path_cache {
+            results.push(entry.clone());
+        }
+        let (path, files) = entry;
+        db.add(path, files)
+            .chain_err(|| ErrorKind::WriteDatabase(args.database.clone()))?;
+    }
     errstln!("");
 
     if args.path_cache {
