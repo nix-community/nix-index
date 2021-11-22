@@ -26,7 +26,6 @@ use std::pin::Pin;
 use std::process;
 use std::result;
 use std::str;
-use tokio::runtime::Runtime;
 
 use nix_index::database;
 use nix_index::files::FileTree;
@@ -174,9 +173,8 @@ struct Args {
 }
 
 /// The main function of this module: creates a new nix-index database.
-fn update_index(
+async fn update_index(
     args: &Args,
-    lp: &mut Runtime,
 ) -> Result<()> {
     errstln!("+ querying available packages");
     // first try to load the paths.cache if requested, otherwise query
@@ -253,7 +251,7 @@ fn update_index(
         .chain_err(|| ErrorKind::CreateDatabase(args.database.clone()))?;
 
     let mut results: Vec<(StorePath, FileTree)> = Vec::new();
-    lp.block_on(requests.try_for_each(|entry| {
+    requests.try_for_each(|entry| {
         let doit = || -> Result<_> {
             if args.path_cache {
                 results.push(entry.clone());
@@ -264,7 +262,7 @@ fn update_index(
             Ok(())
         };
         future::ready(doit())
-    }))?;
+    }).await?;
     errstln!("");
 
     if args.path_cache {
@@ -302,9 +300,8 @@ fn process_args(matches: &ArgMatches) -> result::Result<Args, clap::Error> {
     Ok(args)
 }
 
-fn main() {
-    let mut lp = Runtime::new().unwrap();
-
+#[tokio::main]
+async fn main() {
     let base = xdg::BaseDirectories::with_prefix("nix-index").unwrap();
     let cache_dir = base.get_cache_home();
     let cache_dir = cache_dir.to_string_lossy();
@@ -348,7 +345,7 @@ fn main() {
 
     let args = process_args(&matches).unwrap_or_else(|e| e.exit());
 
-    if let Err(e) = update_index(&args, &mut lp) {
+    if let Err(e) = update_index(&args).await {
         errln!("error: {}", e);
 
         for e in e.iter().skip(1) {
