@@ -1,7 +1,12 @@
 use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
-use grep::{self, Grep, GrepBuilder, Match};
+use error_chain::error_chain;
+use grep::matcher::{LineMatchKind, Match, Matcher, NoError};
+use grep::{self};
+use memchr::{memchr, memrchr};
 use regex::bytes::Regex;
-use regex_syntax::Expr;
+use regex_syntax::ast::{
+    Alternation, Assertion, AssertionKind, Ast, Concat, Group, Literal, Repetition,
+};
 use serde_json;
 use std::fs::File;
 /// Creating and searching file databases.
@@ -29,7 +34,7 @@ const FILE_MAGIC: &'static [u8] = b"NIXI";
 pub struct Writer {
     /// The encoder used to compress the database. Will be set to `None` when the value
     /// is dropped.
-    writer: Option<BufWriter<zstd::Encoder<File>>>,
+    writer: Option<BufWriter<zstd::Encoder<'static, File>>>,
 }
 
 // We need to make sure that the encoder is `finish`ed in all cases, so we need
@@ -115,7 +120,7 @@ error_chain! {
 
     foreign_links {
         Io(io::Error);
-        Grep(grep::Error);
+        Grep(grep::regex::Error);
     }
 }
 
@@ -127,7 +132,7 @@ impl From<frcode::Error> for Error {
 
 /// A Reader allows fast querying of a nix-index database.
 pub struct Reader {
-    decoder: frcode::Decoder<BufReader<zstd::Decoder<BufReader<File>>>>,
+    decoder: frcode::Decoder<BufReader<zstd::Decoder<'static, BufReader<File>>>>,
 }
 
 impl Reader {
@@ -216,36 +221,44 @@ impl<'a, 'b> Query<'a, 'b> {
     ///
     /// There is no guarantee about the order of the returned matches.
     pub fn run(self) -> Result<ReaderIter<'a, 'b>> {
-        let mut expr = Expr::parse(self.exact_regex.as_str()).expect("regex cannot be invalid");
+        let mut expr = regex_syntax::ast::parse::Parser::new()
+            .parse(self.exact_regex.as_str())
+            .expect("regex cannot be invalid");
         // replace the ^ anchor by a NUL byte, since each entry is of the form `METADATA\0PATH`
         // (so the NUL byte marks the start of the path).
         {
             let mut stack = vec![&mut expr];
             while let Some(e) = stack.pop() {
                 match *e {
-                    Expr::StartText => {
-                        *e = Expr::LiteralBytes {
-                            bytes: b"\0".to_vec(),
-                            casei: false,
-                        }
+                    Ast::Assertion(Assertion {
+                        kind: AssertionKind::StartLine,
+                        span,
+                    }) => {
+                        *e = Ast::Literal(Literal {
+                            span,
+                            c: '\0',
+                            kind: regex_syntax::ast::LiteralKind::Verbatim,
+                        })
                     }
-                    Expr::Group { ref mut e, .. } => stack.push(e),
-                    Expr::Repeat { ref mut e, .. } => stack.push(e),
-                    Expr::Concat(ref mut exprs) | Expr::Alternate(ref mut exprs) => {
-                        stack.extend(exprs)
-                    }
+                    Ast::Group(Group { ref mut ast, .. }) => stack.push(ast),
+                    Ast::Repetition(Repetition { ref mut ast, .. }) => stack.push(ast),
+                    Ast::Concat(Concat { ref mut asts, .. })
+                    | Ast::Alternation(Alternation { ref mut asts, .. }) => stack.extend(asts),
                     _ => {}
                 }
             }
         }
-        let grep = GrepBuilder::new(&format!("{}", expr)).build()?;
+        let mut regex_builder = grep::regex::RegexMatcherBuilder::new();
+        regex_builder.line_terminator(Some(b'\n')).multi_line(true);
+
+        let grep = regex_builder.build(&format!("{}", expr))?;
         Ok(ReaderIter {
             reader: self.reader,
             found: Vec::new(),
             found_without_package: Vec::new(),
             pattern: grep,
             exact_pattern: self.exact_regex,
-            package_entry_pattern: GrepBuilder::new("^p\0").build().expect("valid regex"),
+            package_entry_pattern: regex_builder.build("^p\0").expect("valid regex"),
             package_name_pattern: self.package_pattern,
             package_hash: self.hash,
         })
@@ -271,16 +284,53 @@ pub struct ReaderIter<'a, 'b> {
     ///
     /// The pattern here may produce false positives (for example, if it matches inside the metadata of a file
     /// entry). This is not a problem, as matches are later checked against `exact_pattern`.
-    pattern: Grep,
+    pattern: grep::regex::RegexMatcher,
     /// The raw pattern, as supplied to `find_iter`. This is used to verify matches, since `pattern` itself
     /// may produce false positives.
     exact_pattern: &'a Regex,
     /// Pattern that matches only package entries.
-    package_entry_pattern: Grep,
+    package_entry_pattern: grep::regex::RegexMatcher,
     /// Pattern that the package name should match.
     package_name_pattern: Option<&'b Regex>,
     /// Only search the package with the given hash.
     package_hash: Option<String>,
+}
+
+fn consume_no_error<T>(e: NoError) -> T {
+    panic!("impossible: {}", e)
+}
+
+fn next_matching_line<M: Matcher<Error = NoError>>(
+    matcher: M,
+    buf: &[u8],
+    mut start: usize,
+) -> Option<Match> {
+    while let Some(candidate) = matcher
+        .find_candidate_line(&buf[start..])
+        .unwrap_or_else(consume_no_error)
+    {
+        let (pos, confirmed) = match candidate {
+            LineMatchKind::Confirmed(pos) => (start + pos, true),
+            LineMatchKind::Candidate(pos) => (start + pos, false),
+        };
+
+        let line_start = memrchr(b'\n', &buf[..pos]).map(|x| x + 1).unwrap_or(0);
+        let line_end = memchr(b'\n', &buf[pos..])
+            .map(|x| x + pos + 1)
+            .unwrap_or(buf.len());
+
+        if !confirmed
+            && !matcher
+                .is_match(&buf[line_start..line_end])
+                .unwrap_or_else(consume_no_error)
+        {
+            start = line_end;
+            continue;
+        }
+
+        return Some(Match::new(line_start, line_end));
+    }
+    None
 }
 
 impl<'a, 'b> ReaderIter<'a, 'b> {
@@ -319,11 +369,17 @@ impl<'a, 'b> ReaderIter<'a, 'b> {
                     }
                 }
 
-                let mut mat = Match::new();
-                if no_more_package || !package_entry_pattern.read_match(&mut mat, block, item_end) {
-                    no_more_package = true;
+                if no_more_package {
                     return Ok(None);
                 }
+
+                let mat = match next_matching_line(&package_entry_pattern, &block, item_end) {
+                    Some(v) => v,
+                    None => {
+                        no_more_package = true;
+                        return Ok(None);
+                    }
+                };
 
                 let json = &block[mat.start() + 2..mat.end() - 1];
                 let pkg: StorePath = serde_json::from_slice(json)
@@ -356,12 +412,15 @@ impl<'a, 'b> ReaderIter<'a, 'b> {
             }
 
             // process all matches in this block
-            let mut mat = Match::new();
-            while self.pattern.read_match(&mut mat, block, pos) {
+            while let Some(mat) = next_matching_line(&self.pattern, &block, pos) {
                 pos = mat.end();
                 let entry = &block[mat.start()..mat.end() - 1];
                 // skip entries that aren't describing file paths
-                if self.package_entry_pattern.regex().is_match(entry) {
+                if self
+                    .package_entry_pattern
+                    .is_match(entry)
+                    .unwrap_or_else(consume_no_error)
+                {
                     continue;
                 }
 
@@ -407,5 +466,27 @@ impl<'a, 'b> Iterator for ReaderIter<'a, 'b> {
             Err(e) => Some(Err(e)),
             Ok(v) => v.map(Ok),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_next_matching_line_package() {
+        let matcher = grep::regex::RegexMatcherBuilder::new()
+            .line_terminator(Some(b'\n'))
+            .multi_line(true)
+            .build("^p")
+            .expect("valid regex");
+        let buffer = br#"
+SOME LINE
+pDATA
+ANOTHER LINE
+        "#;
+
+        let mat = next_matching_line(matcher, buffer, 0);
+        assert_eq!(mat, Some(Match::new(11, 17)));
     }
 }

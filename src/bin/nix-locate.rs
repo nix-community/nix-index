@@ -1,20 +1,8 @@
 //! Tool for searching for files in nixpkgs packages
-#[macro_use]
-extern crate clap;
-extern crate ansi_term;
-extern crate grep;
-extern crate isatty;
-extern crate nix_index;
-extern crate regex;
-extern crate separator;
-extern crate xdg;
-#[macro_use]
-extern crate error_chain;
-#[macro_use]
-extern crate stderr;
-
 use ansi_term::Colour::Red;
+use clap::{crate_authors, crate_version};
 use clap::{App, Arg, ArgMatches};
+use error_chain::error_chain;
 use regex::bytes::Regex;
 use separator::Separatable;
 use std::collections::HashSet;
@@ -22,6 +10,7 @@ use std::path::PathBuf;
 use std::process;
 use std::result;
 use std::str;
+use stderr::{err, errln};
 
 use nix_index::database;
 use nix_index::files::{self, FileTreeEntry, FileType};
@@ -224,7 +213,7 @@ fn process_args(matches: &ArgMatches) -> result::Result<Args, clap::Error> {
                     .collect()
             }),
         only_toplevel: matches.is_present("toplevel"),
-        color: color.unwrap_or_else(isatty::stdout_isatty),
+        color: color.unwrap_or_else(|| atty::is(atty::Stream::Stdout)),
         minimal: matches.is_present("minimal"),
     };
     Ok(args)

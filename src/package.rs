@@ -7,6 +7,8 @@ use std::borrow::Cow;
 use std::io::{self, Write};
 use std::str;
 
+use serde::{Deserialize, Serialize};
+
 /// A type for describing how to reach a given store path.
 ///
 /// When building an index, we collect store paths from various sources, such

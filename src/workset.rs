@@ -53,7 +53,7 @@
 //! }
 //! ```
 use futures::Stream;
-use ordermap::OrderMap;
+use indexmap::IndexMap;
 use std::cell::RefCell;
 use std::collections::HashSet;
 use std::hash::Hash;
@@ -70,14 +70,14 @@ struct Shared<K, V> {
 
     /// The map of items that still need to be processed. As long as this is non-empty,
     /// there is still work remaining.
-    queue: OrderMap<K, V>,
+    queue: IndexMap<K, V>,
 }
 
 impl<K: Hash + Eq, V> Shared<K, V> {
     /// Add a task to the work queue if the given key still needs to be processed.
     /// Returns `true` if a new item was added, `false` otherwise.
     fn insert(&mut self, k: K, v: V) -> bool {
-        use ordermap::Entry::*;
+        use indexmap::map::Entry::*;
         if !self.seen.contains(&k) {
             match self.queue.entry(k) {
                 Occupied(_) => return false,
@@ -177,7 +177,7 @@ impl<K: Hash + Eq + 'static, V: 'static> FromIterator<(K, V)> for WorkSet<K, V> 
     fn from_iter<I: IntoIterator<Item = (K, V)>>(iter: I) -> WorkSet<K, V> {
         let shared = Shared {
             seen: HashSet::new(),
-            queue: OrderMap::from_iter(iter),
+            queue: IndexMap::from_iter(iter),
         };
         WorkSet {
             state: Rc::new(RefCell::new(shared)),

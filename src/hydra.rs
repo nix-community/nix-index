@@ -3,17 +3,18 @@
 //! This module has all functions that deal with accessing hydra or the binary cache.
 //! Currently, it only provides two functions: `fetch_files` to get the file listing for
 //! a store path and `fetch_references` to retrieve the references from the narinfo.
-use serde;
+use serde::{self, Deserialize};
 use serde_json;
 
 use brotli2::write::BrotliDecoder;
+use error_chain::error_chain;
 use futures::future::{self, Either};
 use futures::{Future, TryFutureExt};
 use headers::{Authorization, HeaderValue};
 use hyper::client::{Client as HyperClient, HttpConnector};
 use hyper::{self, Body, Request, StatusCode, Uri};
 use hyper_proxy::{Custom, Intercept, Proxy, ProxyConnector};
-use serde::de::{Deserialize, Deserializer, MapAccess, Visitor};
+use serde::de::{Deserializer, MapAccess, Visitor};
 use serde_bytes::ByteBuf;
 use std::collections::HashMap;
 use std::env::var;
