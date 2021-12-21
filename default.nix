@@ -3,9 +3,9 @@ let
   nixpkgsRev = "8e1eab9eae4278c9bb1dcae426848a581943db5a";
   defaultNixpkgs = builtins.fetchTarball "github.com/NixOS/nixpkgs/archive/${nixpkgsRev}.tar.gz";
 in
-{ nixpkgs ? defaultNixpkgs }:
+{ nixpkgs ? defaultNixpkgs, pkgs ? import nixpkgs {}, ... }:
 
-with (import nixpkgs {}); with rustPlatform;
+with pkgs; with rustPlatform;
 
 buildRustPackage rec {
   name = "nix-index-${version}";
