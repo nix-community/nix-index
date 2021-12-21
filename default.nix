@@ -12,7 +12,7 @@ buildRustPackage rec {
   version = "0.1.3";
 
   src = builtins.filterSource (name: type: !lib.hasPrefix "target" (baseNameOf name) && !lib.hasPrefix "result" (baseNameOf name) && name != ".git") ./.;
-  buildInputs = [openssl curl];
+  buildInputs = [openssl curl] ++ lib.optional pkgs.targetPlatform.isDarwin [pkgs.darwin.apple_sdk.frameworks.Security pkgs.libiconv];
   nativeBuildInputs = [ pkg-config ];
 
   cargoLock = {
