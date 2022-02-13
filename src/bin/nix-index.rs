@@ -169,6 +169,7 @@ struct Args {
     compression_level: i32,
     path_cache: bool,
     show_trace: bool,
+    filter_prefix: String,
 }
 
 /// The main function of this module: creates a new nix-index database.
@@ -244,7 +245,11 @@ async fn update_index(args: &Args) -> Result<()> {
     // Filter packages with no file listings available
     let mut files = files.filter_map(|entry| future::ready(entry));
 
-    errst!("+ generating index\r");
+    errst!("+ generating index");
+    if args.filter_prefix.len() > 0 {
+        errst!(" (filtering by `{}`)", args.filter_prefix);
+    }
+    errst!("\r");
     fs::create_dir_all(&args.database)
         .chain_err(|| ErrorKind::CreateDatabaseDir(args.database.clone()))?;
     let mut db = database::Writer::create(args.database.join("files"), args.compression_level)
@@ -256,7 +261,7 @@ async fn update_index(args: &Args) -> Result<()> {
             results.push(entry.clone());
         }
         let (path, files) = entry;
-        db.add(path, files)
+        db.add(path, files, args.filter_prefix.as_bytes())
             .chain_err(|| ErrorKind::WriteDatabase(args.database.clone()))?;
     }
     errstln!("");
@@ -290,6 +295,7 @@ fn process_args(matches: &ArgMatches) -> result::Result<Args, clap::Error> {
         compression_level: value_t!(matches.value_of("level"), i32)?,
         path_cache: matches.is_present("path-cache"),
         show_trace: matches.is_present("show-trace"),
+        filter_prefix: matches.value_of("filter-prefix").unwrap_or("").to_string(),
     };
 
     Ok(args)
@@ -306,30 +312,33 @@ async fn main() {
         .author(crate_authors!())
         .about("Builds an index for nix-locate.")
         .arg(Arg::with_name("requests")
-             .short("r")
-             .long("requests")
-             .value_name("NUM")
-             .help("make NUM http requests in parallel")
-             .default_value("100"))
+            .short("r")
+            .long("requests")
+            .value_name("NUM")
+            .help("Make NUM http requests in parallel")
+            .default_value("100"))
         .arg(Arg::with_name("database")
-             .short("d")
-             .long("db")
-             .default_value(&cache_dir)
-             .help("Directory where the index is stored"))
+            .short("d")
+            .long("db")
+            .default_value(&cache_dir)
+            .help("Directory where the index is stored"))
         .arg(Arg::with_name("nixpkgs")
-             .short("f")
-             .long("nixpkgs")
-             .help("Path to nixpgs for which to build the index, as accepted by nix-env -f")
-             .default_value("<nixpkgs>"))
+            .short("f")
+            .long("nixpkgs")
+            .help("Path to nixpkgs for which to build the index, as accepted by nix-env -f")
+            .default_value("<nixpkgs>"))
         .arg(Arg::with_name("level")
-             .short("c")
-             .long("compression")
-             .help("Zstandard compression level")
-             .default_value("22"))
+            .short("c")
+            .long("compression")
+            .help("Zstandard compression level")
+            .default_value("22"))
         .arg(Arg::with_name("show-trace")
-             .long("show-trace")
-             .help("Show a stack trace in case of Nix expression evaluation errors")
-        )
+            .long("show-trace")
+            .help("Show a stack trace in case of Nix expression evaluation errors"))
+        .arg(Arg::with_name("filter-prefix")
+            .long("filter-prefix")
+            .value_name("PREFIX")
+            .help("Only add paths starting with PREFIX (e.g. `/bin/`)"))
         .arg(Arg::with_name("path-cache")
              .long("path-cache")
              .hidden(true)

@@ -215,7 +215,7 @@ impl FileTree {
         })
     }
 
-    pub fn to_list(&self) -> Vec<FileTreeEntry> {
+    pub fn to_list(&self, filter_prefix: &[u8]) -> Vec<FileTreeEntry> {
         let mut result = Vec::new();
 
         let mut stack = Vec::with_capacity(16);
@@ -235,10 +235,9 @@ impl FileTree {
                     stack.push((path, entry));
                 }
             }
-            result.push(FileTreeEntry {
-                path: path,
-                node: node,
-            });
+            if path.starts_with(filter_prefix) {
+                result.push(FileTreeEntry { path, node });
+            }
         }
         result
     }

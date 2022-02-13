@@ -62,12 +62,17 @@ impl Writer {
     }
 
     /// Add a new package to the database for the given store path with its corresponding
-    /// file tree.
-    pub fn add(&mut self, path: StorePath, files: FileTree) -> io::Result<()> {
+    /// file tree. Entries are only added if they match `filter_prefix`.
+    pub fn add(
+        &mut self,
+        path: StorePath,
+        files: FileTree,
+        filter_prefix: &[u8],
+    ) -> io::Result<()> {
         let writer = self.writer.as_mut().expect("not dropped yet");
         let mut encoder =
             frcode::Encoder::new(writer, b"p".to_vec(), serde_json::to_vec(&path).unwrap());
-        for entry in files.to_list() {
+        for entry in files.to_list(filter_prefix) {
             entry.encode(&mut encoder)?;
         }
         Ok(())
