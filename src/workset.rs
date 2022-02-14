@@ -17,7 +17,7 @@
 //! extern crate futures;
 //! extern crate nix_index;
 //!
-//! use futures::{Stream};
+//! use futures::{Stream, stream::StreamExt};
 //! use nix_index::workset::{WorkSet};
 //! use std::iter::{self, FromIterator};
 //!
