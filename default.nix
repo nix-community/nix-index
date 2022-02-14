@@ -3,21 +3,23 @@ let
   nixpkgsRev = "8e1eab9eae4278c9bb1dcae426848a581943db5a";
   defaultNixpkgs = builtins.fetchTarball "github.com/NixOS/nixpkgs/archive/${nixpkgsRev}.tar.gz";
 in
-{ nixpkgs ? defaultNixpkgs }:
+{ nixpkgs ? defaultNixpkgs, pkgs ? import nixpkgs {}, ... }:
 
-with (import nixpkgs {}); with rustPlatform;
+with pkgs; with rustPlatform;
 
 buildRustPackage rec {
   name = "nix-index-${version}";
   version = "0.1.3";
 
   src = builtins.filterSource (name: type: !lib.hasPrefix "target" (baseNameOf name) && !lib.hasPrefix "result" (baseNameOf name) && name != ".git") ./.;
-  buildInputs = [openssl curl];
+  buildInputs = [openssl curl] ++ lib.optional pkgs.targetPlatform.isDarwin [pkgs.darwin.apple_sdk.frameworks.Security pkgs.libiconv];
   nativeBuildInputs = [ pkg-config ];
 
   cargoLock = {
     lockFile = ./Cargo.lock;
   };
+
+  doCheck = !pkgs.targetPlatform.isDarwin;
 
   postInstall = ''
     mkdir -p $out/etc/profile.d
