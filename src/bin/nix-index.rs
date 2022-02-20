@@ -6,9 +6,7 @@ extern crate futures;
 extern crate hyper;
 extern crate nix_index;
 extern crate separator;
-extern crate tokio_core;
 extern crate tokio_retry;
-extern crate tokio_timer;
 extern crate void;
 extern crate xdg;
 #[macro_use]
@@ -18,18 +16,16 @@ extern crate stderr;
 
 use clap::{App, Arg, ArgMatches};
 use error_chain::ChainedError;
-use futures::future;
-use futures::{Future, Stream};
+use futures::{future, FutureExt, Stream, StreamExt, TryFutureExt};
 use separator::Separatable;
 use std::fs::{self, File};
 use std::io::{self, Write};
 use std::iter::FromIterator;
 use std::path::PathBuf;
+use std::pin::Pin;
 use std::process;
 use std::result;
 use std::str;
-use tokio_core::reactor::Core;
-use void::ResultVoidExt;
 
 use nix_index::database;
 use nix_index::files::FileTree;
@@ -89,7 +85,7 @@ error_chain! {
 /// If a store path has no file listing (for example, because it is not built by hydra),
 /// the file listing will be `None` instead.
 type FileListingStream<'a> =
-    Box<dyn Stream<Item = Option<(StorePath, FileTree)>, Error = Error> + 'a>;
+    Pin<Box<dyn Stream<Item = Result<Option<(StorePath, FileTree)>>> + 'a>>;
 
 /// Fetches all the file listings for the full closure of the given starting set of path.
 ///
@@ -120,23 +116,22 @@ fn fetch_file_listings(
                         let hash = reference.hash().into_owned();
                         handle.add_work(hash, reference);
                     }
-                    future::Either::B(fetcher.fetch_files(&path).then(move |r| match r {
+                    future::Either::Left(fetcher.fetch_files(&path).map(move |r| match r {
                         Err(e) => Err(Error::with_chain(e, ErrorKind::FetchFiles(path))),
                         Ok(Some(files)) => Ok(Some((path, files))),
                         Ok(None) => Ok(None),
                     }))
                 }
-                None => future::Either::A(future::ok(None)),
+                None => future::Either::Right(future::ok(None)),
             })
     };
 
     // Process all paths in the queue, until the queue becomes empty.
     let watch = workset.watch();
     let stream = workset
-        .then(|r| future::ok(r.void_unwrap()))
         .map(move |(handle, path)| process(handle, path))
         .buffer_unordered(jobs);
-    (Box::new(stream), watch)
+    (Box::pin(stream), watch)
 }
 
 /// Tries to load the file listings for all paths from a cache file named `paths.cache`.
@@ -151,20 +146,19 @@ fn try_load_paths_cache() -> Result<Option<(FileListingStream<'static>, WorkSetW
 
     let mut input = io::BufReader::new(file);
     let fetched: Vec<(StorePath, FileTree)> =
-        bincode::deserialize_from(&mut input, bincode::Infinite)
-            .chain_err(|| ErrorKind::LoadPathsCache)?;
+        bincode::deserialize_from(&mut input).chain_err(|| ErrorKind::LoadPathsCache)?;
     let workset = WorkSet::from_iter(
         fetched
             .into_iter()
             .map(|(path, tree)| (path.hash().to_string(), Some((path, tree)))),
     );
     let watch = workset.watch();
-    let stream = workset.then(|r| {
-        let (_handle, v) = r.void_unwrap();
-        future::ok(v)
+    let stream = workset.map(|r| {
+        let (_handle, v) = r;
+        Ok(v)
     });
 
-    Ok(Some((Box::new(stream), watch)))
+    Ok(Some((Box::pin(stream), watch)))
 }
 
 /// A struct holding the processed arguments for database creation.
@@ -175,67 +169,68 @@ struct Args {
     compression_level: i32,
     path_cache: bool,
     show_trace: bool,
+    filter_prefix: String,
 }
 
 /// The main function of this module: creates a new nix-index database.
-fn update_index(
-    args: &Args,
-    lp: &mut Core,
-) -> Result<()> {
-    errstln!("+ querying available packages");
+async fn update_index(args: &Args) -> Result<()> {
     // first try to load the paths.cache if requested, otherwise query
     // the packages normally. Also fall back to normal querying if the paths.cache
     // fails to load.
-    let fetcher =
-        Fetcher::new(CACHE_URL.to_string(), lp.handle()).map_err(|e| ErrorKind::ParseProxy(e))?;
-    let query = || -> Result<_> {
-        if args.path_cache {
-            if let Some(cached) = try_load_paths_cache()? {
-                return Ok(cached);
-            }
-        }
-
-        // These are the paths that show up in `nix-env -qa`.
-        let normal_paths = nixpkgs::query_packages(&args.nixpkgs, None, args.show_trace);
-
-        // We also add some additional sets that only show up in `nix-env -qa -A someSet`.
-        //
-        // Some of these sets are not build directly by hydra. We still include them here
-        // since parts of these sets may be build as dependencies of other packages
-        // that are build by hydra. This way, our attribute path information is more
-        // accurate.
-        //
-        // We only need sets that are not marked "recurseIntoAttrs" here, since if they are,
-        // they are already part of normal_paths.
-        let extra_scopes = [
-            "xlibs",
-            "haskellPackages",
-            "rPackages",
-            "nodePackages",
-            "coqPackages",
-        ];
-
-        let all_paths = normal_paths.chain(extra_scopes.into_iter().flat_map(|scope| {
-            nixpkgs::query_packages(&args.nixpkgs, Some(scope), args.show_trace)
-        }));
-
-        let paths: Vec<StorePath> = all_paths
-            .map(|x| x.chain_err(|| ErrorKind::QueryPackages))
-            .collect::<Result<_>>()?;
-
-        Ok(fetch_file_listings(&fetcher, args.jobs, paths.clone()))
+    let cached = if args.path_cache {
+        errstln!("+ loading paths from cache");
+        try_load_paths_cache()?
+    } else {
+        None
     };
-    let (requests, watch) = query()?;
+
+    let fetcher = Fetcher::new(CACHE_URL.to_string()).map_err(|e| ErrorKind::ParseProxy(e))?;
+    let (files, watch) = match cached {
+        Some(v) => v,
+        None => {
+            errstln!("+ querying available packages");
+            // These are the paths that show up in `nix-env -qa`.
+            let normal_paths = nixpkgs::query_packages(&args.nixpkgs, None, args.show_trace);
+
+            // We also add some additional sets that only show up in `nix-env -qa -A someSet`.
+            //
+            // Some of these sets are not build directly by hydra. We still include them here
+            // since parts of these sets may be build as dependencies of other packages
+            // that are build by hydra. This way, our attribute path information is more
+            // accurate.
+            //
+            // We only need sets that are not marked "recurseIntoAttrs" here, since if they are,
+            // they are already part of normal_paths.
+            let extra_scopes = [
+                "xlibs",
+                "haskellPackages",
+                "rPackages",
+                "nodePackages",
+                "coqPackages",
+            ];
+
+            let all_paths = normal_paths.chain(extra_scopes.iter().flat_map(|scope| {
+                nixpkgs::query_packages(&args.nixpkgs, Some(scope), args.show_trace)
+            }));
+
+            let paths: Vec<StorePath> = all_paths
+                .map(|x| x.chain_err(|| ErrorKind::QueryPackages))
+                .collect::<Result<_>>()?;
+            fetch_file_listings(&fetcher, args.jobs, paths.clone())
+        }
+    };
 
     // Treat request errors as if the file list were missing
-    let requests = requests.or_else(|e| {
-        errst!("\n{}", e.display_chain());
-        Ok(None)
+    let files = files.map(|r| {
+        r.unwrap_or_else(|e| {
+            errst!("\n{}", e.display_chain());
+            None
+        })
     });
 
     // Add progress output
     let (mut indexed, mut missing) = (0, 0);
-    let requests = requests.inspect(|entry| {
+    let files = files.inspect(|entry| {
         if entry.is_some() {
             indexed += 1;
         } else {
@@ -248,24 +243,27 @@ fn update_index(
     });
 
     // Filter packages with no file listings available
-    let requests = requests.filter_map(|entry| entry);
+    let mut files = files.filter_map(|entry| future::ready(entry));
 
-    errst!("+ generating index\r");
+    errst!("+ generating index");
+    if args.filter_prefix.len() > 0 {
+        errst!(" (filtering by `{}`)", args.filter_prefix);
+    }
+    errst!("\r");
     fs::create_dir_all(&args.database)
         .chain_err(|| ErrorKind::CreateDatabaseDir(args.database.clone()))?;
     let mut db = database::Writer::create(args.database.join("files"), args.compression_level)
         .chain_err(|| ErrorKind::CreateDatabase(args.database.clone()))?;
 
     let mut results: Vec<(StorePath, FileTree)> = Vec::new();
-    lp.run(requests.for_each(|entry| -> Result<_> {
+    while let Some(entry) = files.next().await {
         if args.path_cache {
             results.push(entry.clone());
         }
         let (path, files) = entry;
-        db.add(path, files)
+        db.add(path, files, args.filter_prefix.as_bytes())
             .chain_err(|| ErrorKind::WriteDatabase(args.database.clone()))?;
-        Ok(())
-    }))?;
+    }
     errstln!("");
 
     if args.path_cache {
@@ -273,8 +271,7 @@ fn update_index(
         let mut output = io::BufWriter::new(
             File::create("paths.cache").chain_err(|| ErrorKind::WritePathsCache)?,
         );
-        bincode::serialize_into(&mut output, &results, bincode::Infinite)
-            .chain_err(|| ErrorKind::WritePathsCache)?;
+        bincode::serialize_into(&mut output, &results).chain_err(|| ErrorKind::WritePathsCache)?;
     }
 
     let index_size = db
@@ -298,14 +295,14 @@ fn process_args(matches: &ArgMatches) -> result::Result<Args, clap::Error> {
         compression_level: value_t!(matches.value_of("level"), i32)?,
         path_cache: matches.is_present("path-cache"),
         show_trace: matches.is_present("show-trace"),
+        filter_prefix: matches.value_of("filter-prefix").unwrap_or("").to_string(),
     };
 
     Ok(args)
 }
 
-fn main() {
-    let mut lp = Core::new().unwrap();
-
+#[tokio::main]
+async fn main() {
     let base = xdg::BaseDirectories::with_prefix("nix-index").unwrap();
     let cache_dir = base.get_cache_home();
     let cache_dir = cache_dir.to_string_lossy();
@@ -315,30 +312,33 @@ fn main() {
         .author(crate_authors!())
         .about("Builds an index for nix-locate.")
         .arg(Arg::with_name("requests")
-             .short("r")
-             .long("requests")
-             .value_name("NUM")
-             .help("make NUM http requests in parallel")
-             .default_value("100"))
+            .short("r")
+            .long("requests")
+            .value_name("NUM")
+            .help("Make NUM http requests in parallel")
+            .default_value("100"))
         .arg(Arg::with_name("database")
-             .short("d")
-             .long("db")
-             .default_value(&cache_dir)
-             .help("Directory where the index is stored"))
+            .short("d")
+            .long("db")
+            .default_value(&cache_dir)
+            .help("Directory where the index is stored"))
         .arg(Arg::with_name("nixpkgs")
-             .short("f")
-             .long("nixpkgs")
-             .help("Path to nixpgs for which to build the index, as accepted by nix-env -f")
-             .default_value("<nixpkgs>"))
+            .short("f")
+            .long("nixpkgs")
+            .help("Path to nixpkgs for which to build the index, as accepted by nix-env -f")
+            .default_value("<nixpkgs>"))
         .arg(Arg::with_name("level")
-             .short("c")
-             .long("compression")
-             .help("Zstandard compression level")
-             .default_value("22"))
+            .short("c")
+            .long("compression")
+            .help("Zstandard compression level")
+            .default_value("22"))
         .arg(Arg::with_name("show-trace")
-             .long("show-trace")
-             .help("Show a stack trace in case of Nix expression evaluation errors")
-        )
+            .long("show-trace")
+            .help("Show a stack trace in case of Nix expression evaluation errors"))
+        .arg(Arg::with_name("filter-prefix")
+            .long("filter-prefix")
+            .value_name("PREFIX")
+            .help("Only add paths starting with PREFIX (e.g. `/bin/`)"))
         .arg(Arg::with_name("path-cache")
              .long("path-cache")
              .hidden(true)
@@ -349,7 +349,7 @@ fn main() {
 
     let args = process_args(&matches).unwrap_or_else(|e| e.exit());
 
-    if let Err(e) = update_index(&args, &mut lp) {
+    if let Err(e) = update_index(&args).await {
         errln!("error: {}", e);
 
         for e in e.iter().skip(1) {

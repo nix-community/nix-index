@@ -43,7 +43,11 @@ command_not_found_handle () {
 The program '$cmd' is currently not installed. It is provided by
 the package '$toplevel.$attrs', which I will now install for you.
 EOF
-                nix-env -iA $toplevel.$attrs
+                if [ -e "$HOME/.nix-profile/manifest.json" ]; then
+                    nix profile install $toplevel#$attrs
+                else
+                    nix-env -iA $toplevel.$attrs
+                fi
                 if [ "$?" -eq 0 ]; then
                     $@ # TODO: handle pipes correctly if AUTO_RUN/INSTALL is possible
                     return $?
@@ -67,11 +71,25 @@ $cmd: command not found
 EOF
                 fi
             else
-                >&2 cat <<EOF
+                if [ -e "$HOME/.nix-profile/manifest.json" ]; then
+                    >&2 cat <<EOF
+The program '$cmd' is currently not installed. You can install it
+by typing:
+  nix profile install $toplevel#$attrs
+
+Or run it once with:
+  nix run $toplevel#$attrs --command ...
+EOF
+                else
+                    >&2 cat <<EOF
 The program '$cmd' is currently not installed. You can install it
 by typing:
   nix-env -iA $toplevel.$attrs
+
+Or run it once with:
+  nix-shell -p $attrs --run ...
 EOF
+                fi
             fi
             ;;
         *)
@@ -83,7 +101,24 @@ EOF
             # ensure we get each element of attrs
             # in a cross platform way
             while read attr; do
-                >&2 echo "  nix-env -iA $toplevel.$attr"
+                if [ -e "$HOME/.nix-profile/manifest.json" ]; then
+                    >&2 echo "  nix profile install $toplevel#$attr"
+                else
+                    >&2 echo "  nix-env -iA $toplevel.$attr"
+                fi
+            done <<< "$attrs"
+
+            >&2 cat <<EOF
+
+Or run it once with:
+EOF
+
+            while read attr; do
+                if [ -e "$HOME/.nix-profile/manifest.json" ]; then
+                    >&2 echo "  nix run $toplevel#$attr --command ..."
+                else
+                    >&2 echo "  nix-shell -p $attr --run ..."
+                fi
             done <<< "$attrs"
             ;;
     esac

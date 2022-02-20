@@ -21,10 +21,12 @@
 
         src = self;
 
-        nativeBuildInputs = [ pkgconfig ];
+        nativeBuildInputs = [ pkg-config ];
         buildInputs = [ openssl curl ]
-          ++ lib.optional stdenv.hostPlatform.isDarwin darwin.apple_sdk.frameworks.Security;
-        cargoSha256 = "1fm3glbivybn8f9phwvm3q7fnqr7abcqzdh6fxfglhqb702zrx46";
+          ++ lib.optionals stdenv.hostPlatform.isDarwin [ darwin.apple_sdk.frameworks.Security libiconv ];
+        cargoLock = {
+          lockFile = ./Cargo.lock;
+        };
 
         postInstall = ''
           mkdir -p $out/etc/profile.d

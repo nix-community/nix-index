@@ -3,15 +3,15 @@
 //! This module implements the gathering of initial set of root store paths to fetch.
 //! We parse the output `nix-env --query` to figure out all accessible store paths with their attribute path
 //! and hashes.
-use xml;
-use std::io::{self, Read};
-use xml::reader::{EventReader, XmlEvent};
-use xml::common::{TextPosition, Position};
-use std::process::{Command, Stdio, Child, ChildStdout};
-use std::fmt;
 use std::error;
+use std::fmt;
+use std::io::{self, Read};
+use std::process::{Child, ChildStdout, Command, Stdio};
+use xml;
+use xml::common::{Position, TextPosition};
+use xml::reader::{EventReader, XmlEvent};
 
-use package::{PathOrigin, StorePath};
+use crate::package::{PathOrigin, StorePath};
 
 /// Calls `nix-env` to list the packages in the given nixpkgs.
 ///
@@ -115,25 +115,23 @@ impl Iterator for PackagesQuery<ChildStdout> {
         if let Err(e) = self.ensure_initialized() {
             return Some(Err(e));
         }
-        self.parser
-            .take()
-            .and_then(|mut parser| {
-                parser
-                    .next()
-                    .map(|v| {
-                        self.parser = Some(parser);
-                        // When the parser throws an error, we first wait for the subprocess to exit.
-                        //
-                        // If the subprocess returned an error, then the parser probably tried to parse garbage output
-                        // so we will ignore the parser error and instead return the error printed by the subprocess.
-                        v.map_err(|e| self.check_error().unwrap_or_else(|| Error::from(e)))
-                    })
-                    .or_else(|| {
-                        self.parser = None;
-                        // At the end, we should check if the subprocess exited successfully.
-                        self.check_error().map(Err)
-                    })
-            })
+        self.parser.take().and_then(|mut parser| {
+            parser
+                .next()
+                .map(|v| {
+                    self.parser = Some(parser);
+                    // When the parser throws an error, we first wait for the subprocess to exit.
+                    //
+                    // If the subprocess returned an error, then the parser probably tried to parse garbage output
+                    // so we will ignore the parser error and instead return the error printed by the subprocess.
+                    v.map_err(|e| self.check_error().unwrap_or_else(|| Error::from(e)))
+                })
+                .or_else(|| {
+                    self.parser = None;
+                    // At the end, we should check if the subprocess exited successfully.
+                    self.check_error().map(Err)
+                })
+        })
     }
 }
 
@@ -197,8 +195,7 @@ impl fmt::Display for ParserError {
                 write!(
                     f,
                     "element {} appears outside of expected parent {}",
-                    element_name,
-                    expected_parent
+                    element_name, expected_parent
                 )
             }
             ParentNotAllowed {
@@ -208,8 +205,7 @@ impl fmt::Display for ParserError {
                 write!(
                     f,
                     "element {} must not appear as child of {}",
-                    element_name,
-                    found_parent
+                    element_name, found_parent
                 )
             }
             MissingAttribute {
@@ -219,8 +215,7 @@ impl fmt::Display for ParserError {
                 write!(
                     f,
                     "element {} must have an attribute named {}",
-                    element_name,
-                    attribute_name
+                    element_name, attribute_name
                 )
             }
             MissingStartTag { ref element_name } => {
@@ -263,13 +258,14 @@ impl<R: Read> PackagesParser<R> {
     /// This function is like `.next` from `Iterator`, but allows us to use `try! / ?` since it
     /// returns `Result<Option<...>, ...>` instead of `Option<Result<..., ...>>`.
     fn next_err(&mut self) -> Result<Option<StorePath>, ParserError> {
-        use self::XmlEvent::*;
         use self::ParserErrorKind::*;
+        use self::XmlEvent::*;
 
         loop {
-            let event = self.events.next().map_err(
-                |e| self.err(XmlError { error: e }),
-            )?;
+            let event = self
+                .events
+                .next()
+                .map_err(|e| self.err(XmlError { error: e }))?;
             match event {
                 StartElement {
                     name: element_name,
@@ -284,9 +280,9 @@ impl<R: Read> PackagesParser<R> {
                             }));
                         }
 
-                        let attr_path = attributes.into_iter().find(
-                            |a| a.name.local_name == "attrPath",
-                        );
+                        let attr_path = attributes
+                            .into_iter()
+                            .find(|a| a.name.local_name == "attrPath");
                         let attr_path = attr_path.ok_or_else(|| {
                             self.err(MissingAttribute {
                                 element_name: "item".into(),
@@ -335,9 +331,8 @@ impl<R: Read> PackagesParser<R> {
                                 toplevel: true,
                             };
                             let store_path = StorePath::parse(origin, &output_path);
-                            let store_path = store_path.ok_or_else(|| {
-                                self.err(InvalidStorePath { path: output_path })
-                            })?;
+                            let store_path = store_path
+                                .ok_or_else(|| self.err(InvalidStorePath { path: output_path }))?;
 
                             return Ok(Some(store_path));
                         } else {
@@ -352,7 +347,9 @@ impl<R: Read> PackagesParser<R> {
                 EndElement { name: element_name } => {
                     if element_name.local_name == "item" {
                         if self.current_item.is_none() {
-                            return Err(self.err(MissingStartTag { element_name: "item".into() }));
+                            return Err(self.err(MissingStartTag {
+                                element_name: "item".into(),
+                            }));
                         }
                         self.current_item = None
                     }
@@ -377,7 +374,6 @@ impl<R: Read> Iterator for PackagesParser<R> {
             Ok(Some(i)) => Some(Ok(i)),
             Ok(None) => None,
         }
-
     }
 }
 
@@ -420,7 +416,6 @@ impl From<io::Error> for Error {
         Error::Io(err)
     }
 }
-
 
 impl From<ParserError> for Error {
     fn from(err: ParserError) -> Error {

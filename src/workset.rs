@@ -17,7 +17,7 @@
 //! extern crate futures;
 //! extern crate nix_index;
 //!
-//! use futures::{Stream};
+//! use futures::{Stream, stream::StreamExt};
 //! use nix_index::workset::{WorkSet};
 //! use std::iter::{self, FromIterator};
 //!
@@ -52,14 +52,15 @@
 //!    // and pkgD itself
 //! }
 //! ```
-use futures::{Stream, Async, Poll};
-use std::collections::HashSet;
-use ordermap::OrderMap;
-use void::Void;
-use std::rc::{Rc, Weak};
+use futures::Stream;
+use indexmap::IndexMap;
 use std::cell::RefCell;
+use std::collections::HashSet;
 use std::hash::Hash;
 use std::iter::FromIterator;
+use std::pin::Pin;
+use std::rc::{Rc, Weak};
+use std::task::{Context, Poll};
 
 /// This structure holds the internal state of our queue.
 struct Shared<K, V> {
@@ -69,14 +70,14 @@ struct Shared<K, V> {
 
     /// The map of items that still need to be processed. As long as this is non-empty,
     /// there is still work remaining.
-    queue: OrderMap<K, V>,
+    queue: IndexMap<K, V>,
 }
 
 impl<K: Hash + Eq, V> Shared<K, V> {
     /// Add a task to the work queue if the given key still needs to be processed.
     /// Returns `true` if a new item was added, `false` otherwise.
     fn insert(&mut self, k: K, v: V) -> bool {
-        use ordermap::Entry::*;
+        use indexmap::map::Entry::*;
         if !self.seen.contains(&k) {
             match self.queue.entry(k) {
                 Occupied(_) => return false,
@@ -154,20 +155,20 @@ struct WorkSetObserverImpl<K, V> {
 
 impl<K, V> WorkSetObserver for WorkSetObserverImpl<K, V> {
     fn queue_len(&self) -> usize {
-        self.state.upgrade().map_or(
-            0,
-            |shared: Rc<RefCell<Shared<K, V>>>| {
+        self.state
+            .upgrade()
+            .map_or(0, |shared: Rc<RefCell<Shared<K, V>>>| {
                 shared.as_ref().borrow().queue.len()
-            },
-        )
+            })
     }
 }
-
 
 impl<K: Hash + Eq + 'static, V: 'static> WorkSet<K, V> {
     /// Returns a watch for this work set that provides status information.
     pub fn watch(&self) -> WorkSetWatch {
-        Box::new(WorkSetObserverImpl { state: Rc::downgrade(&self.state) })
+        Box::new(WorkSetObserverImpl {
+            state: Rc::downgrade(&self.state),
+        })
     }
 }
 
@@ -176,9 +177,11 @@ impl<K: Hash + Eq + 'static, V: 'static> FromIterator<(K, V)> for WorkSet<K, V> 
     fn from_iter<I: IntoIterator<Item = (K, V)>>(iter: I) -> WorkSet<K, V> {
         let shared = Shared {
             seen: HashSet::new(),
-            queue: OrderMap::from_iter(iter),
+            queue: IndexMap::from_iter(iter),
         };
-        WorkSet { state: Rc::new(RefCell::new(shared)) }
+        WorkSet {
+            state: Rc::new(RefCell::new(shared)),
+        }
     }
 }
 
@@ -190,24 +193,23 @@ impl<K: Hash + Eq + 'static, V: 'static> FromIterator<(K, V)> for WorkSet<K, V> 
 /// for when exactly that happens.
 impl<K: Hash + Eq, V> Stream for WorkSet<K, V> {
     type Item = (WorkSetHandle<K, V>, V);
-    type Error = Void;
 
-    fn poll(&mut self) -> Poll<Option<Self::Item>, Self::Error> {
+    fn poll_next(self: Pin<&mut Self>, _cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
         let (k, v) = match self.state.borrow_mut().queue.pop() {
             Some(e) => e,
             None => {
-                return Ok({
-                    if Rc::strong_count(&self.state) == 1 {
-                        Async::Ready(None)
-                    } else {
-                        Async::NotReady
-                    }
-                })
+                return if Rc::strong_count(&self.state) == 1 {
+                    Poll::Ready(None)
+                } else {
+                    Poll::Pending
+                }
             }
         };
 
         self.state.borrow_mut().seen.insert(k);
-        let handle = WorkSetHandle { state: self.state.clone() };
-        Ok(Async::Ready(Some((handle, v))))
+        let handle = WorkSetHandle {
+            state: self.state.clone(),
+        };
+        Poll::Ready(Some((handle, v)))
     }
 }
