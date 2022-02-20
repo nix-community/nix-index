@@ -9,7 +9,7 @@
     };
   };
 
-  outputs = { self, nixpkgs }: let
+  outputs = { self, nixpkgs, flake-compat }: let
     systems = [ "x86_64-linux" "x86_64-darwin" ];
     forAllSystems = f: nixpkgs.lib.genAttrs systems (system: f system);
     nixpkgsFor = forAllSystems (system: import nixpkgs { inherit system; });
