@@ -1,7 +1,13 @@
 {
   description = "A files database for nixpkgs";
 
-  inputs.nixpkgs.url = "nixpkgs/nixos-unstable";
+  inputs = {
+    nixpkgs.url = "nixpkgs/nixos-unstable";
+    flake-compat = {
+      url = "github:edolstra/flake-compat";
+      flake = false;
+    };
+  };
 
   outputs = { self, nixpkgs }: let
     systems = [ "x86_64-linux" "x86_64-darwin" ];
