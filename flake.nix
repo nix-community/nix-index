@@ -15,9 +15,9 @@
     nixpkgsFor = forAllSystems (system: import nixpkgs { inherit system; });
   in {
     packages = forAllSystems (system: {
-      nix-index = with nixpkgsFor.${system}; rustPlatform.buildRustPackage rec {
-        name = "nix-index-${version}";
-        version = "0.1.2";
+      nix-index = with nixpkgsFor.${system}; rustPlatform.buildRustPackage  {
+        pname = "nix-index";
+        version = "0.1.3";
 
         src = self;
 
