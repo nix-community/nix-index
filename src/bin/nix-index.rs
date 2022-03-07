@@ -202,7 +202,7 @@ async fn update_index(args: &Args) -> Result<()> {
             // We only need sets that are not marked "recurseIntoAttrs" here, since if they are,
             // they are already part of normal_paths.
             let extra_scopes = [
-                "xlibs",
+                "xorg",
                 "haskellPackages",
                 "rPackages",
                 "nodePackages",
