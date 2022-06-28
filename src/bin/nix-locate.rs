@@ -1,15 +1,16 @@
 //! Tool for searching for files in nixpkgs packages
 use ansi_term::Colour::Red;
-use clap::{crate_authors, crate_version};
-use clap::{App, Arg, ArgMatches};
+use clap::Parser;
 use error_chain::error_chain;
 use regex::bytes::Regex;
 use separator::Separatable;
 use std::collections::HashSet;
+use std::ffi::OsStr;
 use std::path::PathBuf;
 use std::process;
 use std::result;
 use std::str;
+use std::str::FromStr;
 use stderr::{err, errln};
 
 use nix_index::database;
@@ -151,20 +152,15 @@ fn locate(args: &Args) -> Result<()> {
 /// Extract the parsed arguments for clap's arg matches.
 ///
 /// Handles parsing the values of more complex arguments.
-fn process_args(matches: &ArgMatches) -> result::Result<Args, clap::Error> {
-    let pattern_arg = matches
-        .value_of("PATTERN")
-        .expect("pattern arg required")
-        .to_string();
-    let package_arg = matches.value_of("package");
-    let start_anchor = if matches.is_present("at-root") {
-        "^"
-    } else {
-        ""
-    };
-    let end_anchor = if matches.is_present("whole") { "$" } else { "" };
+fn process_args(matches: Opts) -> result::Result<Args, clap::Error> {
+    let pattern_arg = matches.pattern;
+    let package_arg = matches.package;
+
+    let start_anchor = if matches.at_root { "^" } else { "" };
+    let end_anchor = if matches.whole_name { "$" } else { "" };
+
     let make_pattern = |s: &str, wrap: bool| {
-        let regex = if matches.is_present("regex") {
+        let regex = if matches.regex {
             s.to_string()
         } else {
             regex::escape(s)
@@ -175,51 +171,30 @@ fn process_args(matches: &ArgMatches) -> result::Result<Args, clap::Error> {
             regex
         }
     };
-    let color = matches.value_of("color").and_then(|x| {
-        if x == "auto" {
-            return None;
-        }
-        if x == "always" {
-            return Some(true);
-        }
-        if x == "never" {
-            return Some(false);
-        }
-        unreachable!("color can only be auto, always or never (verified by clap already)")
-    });
+
+    let color = match matches.color {
+        Color::Auto => atty::is(atty::Stream::Stdout),
+        Color::Always => true,
+        Color::Never => false,
+    };
+
     let args = Args {
-        database: PathBuf::from(
-            matches
-                .value_of("database")
-                .expect("database has default value by clap"),
-        ),
-        group: !matches.is_present("no-group"),
+        database: matches.database,
+        group: !matches.no_group,
         pattern: make_pattern(&pattern_arg, true),
-        package_pattern: package_arg.map(|p| make_pattern(p, false)),
-        hash: matches.value_of("hash").map(str::to_string),
+        package_pattern: package_arg.as_deref().map(|p| make_pattern(p, false)),
+        hash: matches.hash,
         file_type: matches
-            .values_of("type")
-            .map_or(files::ALL_FILE_TYPES.to_vec(), |types| {
-                types
-                    .map(|t| match t {
-                        "x" => FileType::Regular { executable: true },
-                        "r" => FileType::Regular { executable: false },
-                        "s" => FileType::Symlink,
-                        "d" => FileType::Directory,
-                        _ => unreachable!(
-                            "file type can only be one of x, r, s and d (verified by clap already)"
-                        ),
-                    })
-                    .collect()
-            }),
-        only_toplevel: matches.is_present("toplevel"),
-        color: color.unwrap_or_else(|| atty::is(atty::Stream::Stdout)),
-        minimal: matches.is_present("minimal"),
+            .r#type
+            .unwrap_or_else(|| files::ALL_FILE_TYPES.to_vec()),
+        only_toplevel: matches.top_level,
+        color,
+        minimal: matches.minimal,
     };
     Ok(args)
 }
 
-const LONG_USAGE: &'static str = r#"
+const LONG_USAGE: &str = r#"
 How to use
 ==========
 
@@ -249,88 +224,100 @@ Limitations
   but we know that `xmonad-with-packages.out` requires it.
 "#;
 
-fn main() {
+fn cache_dir() -> &'static OsStr {
     let base = xdg::BaseDirectories::with_prefix("nix-index").unwrap();
-    let cache_dir = base.get_cache_home();
-    let cache_dir = cache_dir.to_string_lossy();
+    let cache_dir = Box::new(base.get_cache_home());
+    let cache_dir = Box::leak(cache_dir);
+    cache_dir.as_os_str()
+}
 
-    let matches = App::new("Nixpkgs Files Indexer")
-        .version(crate_version!())
-        .author(crate_authors!())
-        .about("Quickly finds the derivation providing a certain file")
-        .arg(Arg::with_name("database")
-             .short("d")
-             .long("db")
-             .default_value(&cache_dir)
-             .help("Directory where the index is stored"))
-        .arg(Arg::with_name("PATTERN")
-             .required(true)
-             .help("Pattern for which to search")
-             .index(1))
-        .arg(Arg::with_name("regex")
-             .short("r")
-             .long("regex")
-             .help("Treat PATTERN as regex instead of literal text. Also applies to --name option."))
-        .arg(Arg::with_name("package")
-             .short("p")
-             .long("package")
-             .value_name("PATTERN")
-             .help("Only print matches from packages whose name matches PATTERN."))
-        .arg(Arg::with_name("hash")
-             .long("hash")
-             .value_name("HASH")
-             .help("Only print matches from the package that has the given HASH."))
-        .arg(Arg::with_name("toplevel")
-             .long("top-level")
-             .help("Only print matches from packages that show up in nix-env -qa."))
-        .arg(Arg::with_name("type")
-             .short("t")
-             .long("type")
-             .multiple(true)
-             .number_of_values(1)
-             .value_name("TYPE")
-             .possible_values(&["d", "x", "r", "s"])
-             .help("Only print matches for files that have this type.\
-                    If the option is given multiple times, a file will be printed if it has any of the given types."
-             ))
-         .arg(Arg::with_name("no-group")
-              .long("no-group")
-              .help("Disables grouping of paths with the same matching part. \n\
-                     By default, a path will only be printed if the pattern matches some part\n\
-                     of the last component of the path. For example, the pattern `a/foo` would\n\
-                     match all of `a/foo`, `a/foo/some_file` and `a/foo/another_file`, but only\n\
-                     the first match will be printed. This option disables that behavior and prints\n\
-                     all matches."
-              ))
-        .arg(Arg::with_name("color")
-             .multiple(false)
-             .value_name("COLOR")
-             .possible_values(&["always", "never", "auto"])
-             .help("Whether to use colors in output. If auto, only use colors if outputting to a terminal."))
-        .arg(Arg::with_name("whole")
-             .short("w")
-             .long("whole-name")
-             .help("Only print matches for files or directories whose basename matches PATTERN exactly.\n\
-                    This means that the pattern `bin/foo` will only match a file called `bin/foo` or `xx/bin/foo`\n\
-                    but not `bin/foobar`."
-             ))
-        .arg(Arg::with_name("at-root")
-            .long("at-root")
-            .help("Treat PATTERN as an absolute file path, so it only matches starting from the root of a package.\n\
-                   This means that the pattern `/bin/foo` only matches a file called `/bin/foo` or `/bin/foobar`\n\
-                   but not `/libexec/bin/foo`."
-            ))
-        .arg(Arg::with_name("minimal")
-             .short("1")
-             .long("minimal")
-             .help("Only print attribute names of found files or directories.\n\
-                    Other details such as size or store path are omitted.\n\
-                    This is useful for scripts that use the output of nix-locate."
-             ))
-        .after_help(LONG_USAGE)
-        .get_matches();
+/// Quickly finds the derivation providing a certain file
+#[derive(Debug, Parser)]
+#[clap(author, about, version, after_help = LONG_USAGE)]
+struct Opts {
+    /// Pattern for which to search
+    // #[clap(name = "PATTERN")]
+    pattern: String,
 
-    let args = process_args(&matches).unwrap_or_else(|e| e.exit());
+    /// Directory where the index is stored
+    #[clap(short, long = "db", default_value_os = cache_dir())]
+    database: PathBuf,
+
+    /// Treat PATTERN as regex instead of literal text. Also applies to NAME.
+    #[clap(short, long)]
+    regex: bool,
+
+    /// Only print matches from packages whose name matches PACKAGE.
+    #[clap(short, long)]
+    package: Option<String>,
+
+    /// Only print matches from the package that has the given HASH.
+    #[clap(long, name = "HASH")]
+    hash: Option<String>,
+
+    /// Only print matches from packages that show up in `nix-env -qa`.
+    #[clap(long)]
+    top_level: bool,
+
+    /// Only print matches for files that have this type. If the option is given multiple times, 
+    /// a file will be printed if it has any of the given types.
+    #[clap(short, long, possible_values=["d", "x", "r", "s"])]
+    r#type: Option<Vec<FileType>>,
+
+    /// Disables grouping of paths with the same matching part. By default, a path will only be
+    /// printed if the pattern matches some part of the last component of the path. For example,
+    /// the pattern `a/foo` would match all of `a/foo`, `a/foo/some_file` and `a/foo/another_file`,
+    /// but only the first match will be printed. This option disables that behavior and prints
+    /// all matches.
+    #[clap(long)]
+    no_group: bool,
+
+    /// Whether to use colors in output. If auto, only use colors if outputting to a terminal.
+    #[clap(long, arg_enum, default_value = "auto")]
+    color: Color,
+
+    /// Only print matches for files or directories whose basename matches PATTERN exactly.
+    /// This means that the pattern `bin/foo` will only match a file called `bin/foo` or
+    /// `xx/bin/foo` but not `bin/foobar`.
+    #[clap(short, long)]
+    whole_name: bool,
+
+    /// Treat PATTERN as an absolute file path, so it only matches starting from the root of a
+    /// package. This means that the pattern `/bin/foo` only matches a file called `/bin/foo` or
+    /// `/bin/foobar` but not `/libexec/bin/foo`.
+    #[clap(long)]
+    at_root: bool,
+
+    /// Only print attribute names of found files or directories. Other details such as size or
+    /// store path are omitted. This is useful for scripts that use the output of nix-locate.
+    #[clap(long)]
+    minimal: bool,
+}
+
+#[derive(clap::ArgEnum, Clone, Copy, Debug)]
+enum Color {
+    Always,
+    Never,
+    Auto,
+}
+
+impl FromStr for Color {
+    type Err = &'static str;
+
+    fn from_str(s: &str) -> core::result::Result<Self, Self::Err> {
+        match s {
+            "always" => Ok(Color::Always),
+            "never" => Ok(Color::Never),
+            "auto" => Ok(Color::Auto),
+            _ => Err(""),
+        }
+    }
+}
+
+fn main() {
+    let args = Opts::parse();
+
+    let args = process_args(args).unwrap_or_else(|e| e.exit());
 
     if let Err(e) = locate(&args) {
         errln!("error: {}", e);

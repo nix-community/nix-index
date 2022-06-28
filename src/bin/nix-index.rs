@@ -1,30 +1,18 @@
 //! Tool for generating a nix-index database.
-#[macro_use]
-extern crate clap;
-extern crate bincode;
-extern crate futures;
-extern crate hyper;
-extern crate nix_index;
-extern crate separator;
-extern crate tokio_retry;
-extern crate void;
-extern crate xdg;
-#[macro_use]
-extern crate error_chain;
-#[macro_use]
-extern crate stderr;
 
-use clap::{App, Arg, ArgMatches};
-use error_chain::ChainedError;
-use futures::{future, FutureExt, Stream, StreamExt, TryFutureExt};
+use error_chain::{error_chain, ChainedError};
 use separator::Separatable;
+use stderr::*;
+
+use clap::Parser;
+use futures::{future, FutureExt, Stream, StreamExt, TryFutureExt};
+use std::ffi::OsStr;
 use std::fs::{self, File};
 use std::io::{self, Write};
 use std::iter::FromIterator;
 use std::path::PathBuf;
 use std::pin::Pin;
 use std::process;
-use std::result;
 use std::str;
 
 use nix_index::database;
@@ -37,7 +25,7 @@ use nix_index::workset::{WorkSet, WorkSetHandle, WorkSetWatch};
 /// The URL of the binary cache that we use to fetch file listings and references.
 ///
 /// Hardcoded for now, but may be made a configurable option in the future.
-const CACHE_URL: &'static str = "http://cache.nixos.org";
+const CACHE_URL: &str = "http://cache.nixos.org";
 
 error_chain! {
     errors {
@@ -161,17 +149,6 @@ fn try_load_paths_cache() -> Result<Option<(FileListingStream<'static>, WorkSetW
     Ok(Some((Box::pin(stream), watch)))
 }
 
-/// A struct holding the processed arguments for database creation.
-struct Args {
-    jobs: usize,
-    database: PathBuf,
-    nixpkgs: String,
-    compression_level: i32,
-    path_cache: bool,
-    show_trace: bool,
-    filter_prefix: String,
-}
-
 /// The main function of this module: creates a new nix-index database.
 async fn update_index(args: &Args) -> Result<()> {
     // first try to load the paths.cache if requested, otherwise query
@@ -184,7 +161,7 @@ async fn update_index(args: &Args) -> Result<()> {
         None
     };
 
-    let fetcher = Fetcher::new(CACHE_URL.to_string()).map_err(|e| ErrorKind::ParseProxy(e))?;
+    let fetcher = Fetcher::new(CACHE_URL.to_string()).map_err(ErrorKind::ParseProxy)?;
     let (files, watch) = match cached {
         Some(v) => v,
         None => {
@@ -216,7 +193,7 @@ async fn update_index(args: &Args) -> Result<()> {
             let paths: Vec<StorePath> = all_paths
                 .map(|x| x.chain_err(|| ErrorKind::QueryPackages))
                 .collect::<Result<_>>()?;
-            fetch_file_listings(&fetcher, args.jobs, paths.clone())
+            fetch_file_listings(&fetcher, args.jobs, paths)
         }
     };
 
@@ -243,10 +220,10 @@ async fn update_index(args: &Args) -> Result<()> {
     });
 
     // Filter packages with no file listings available
-    let mut files = files.filter_map(|entry| future::ready(entry));
+    let mut files = files.filter_map(future::ready);
 
     errst!("+ generating index");
-    if args.filter_prefix.len() > 0 {
+    if !args.filter_prefix.is_empty() {
         errst!(" (filtering by `{}`)", args.filter_prefix);
     }
     errst!("\r");
@@ -282,72 +259,53 @@ async fn update_index(args: &Args) -> Result<()> {
     Ok(())
 }
 
-/// Extract the arguments from clap's arg matches, applying defaults and parsing them
-/// where necessary.
-fn process_args(matches: &ArgMatches) -> result::Result<Args, clap::Error> {
-    let args = Args {
-        jobs: value_t!(matches.value_of("requests"), usize)?,
-        database: PathBuf::from(matches.value_of("database").unwrap()),
-        nixpkgs: matches
-            .value_of("nixpkgs")
-            .expect("nixpkgs arg required")
-            .to_string(),
-        compression_level: value_t!(matches.value_of("level"), i32)?,
-        path_cache: matches.is_present("path-cache"),
-        show_trace: matches.is_present("show-trace"),
-        filter_prefix: matches.value_of("filter-prefix").unwrap_or("").to_string(),
-    };
 
-    Ok(args)
+fn cache_dir() -> &'static OsStr {
+    let base = xdg::BaseDirectories::with_prefix("nix-index").unwrap();
+    let cache_dir = Box::new(base.get_cache_home());
+    let cache_dir = Box::leak(cache_dir);
+    cache_dir.as_os_str()
+}
+
+/// Builds an index for nix-locate
+#[derive(Debug, Parser)]
+#[clap(author, about, version)]
+struct Args {
+    /// Make REQUESTS http requests in parallel
+    #[clap(short = 'r', long = "requests", default_value = "100")]
+    jobs: usize,
+
+    /// Directory where the index is stored
+    #[clap(short, long = "db", default_value_os = cache_dir())]
+    database: PathBuf,
+
+    /// Path to nixpkgs for which to build the index, as accepted by nix-env -f
+    #[clap(short = 'f', long, default_value = "<nixpkgs>")]
+    nixpkgs: String,
+
+    /// Zstandard compression level
+    #[clap(short, long = "compression", default_value = "22")]
+    compression_level: i32,
+    
+    /// Show a stack trace in the case of a Nix evaluation error
+    #[clap(long)]
+    show_trace: bool,
+
+    /// Only add paths starting with PREFIX (e.g. `/bin/`)
+    #[clap(long, default_value = "")]
+    filter_prefix: String,
+
+    /// Store and load results of fetch phase in a file called paths.cache. This speeds up testing 
+    /// different database formats / compression.
+    ///
+    /// Note: does not check if the cached data is up to date! Use only for development.
+    #[clap(long)]
+    path_cache: bool,
 }
 
 #[tokio::main]
 async fn main() {
-    let base = xdg::BaseDirectories::with_prefix("nix-index").unwrap();
-    let cache_dir = base.get_cache_home();
-    let cache_dir = cache_dir.to_string_lossy();
-
-    let matches = App::new("Nixpkgs Files Indexer")
-        .version(crate_version!())
-        .author(crate_authors!())
-        .about("Builds an index for nix-locate.")
-        .arg(Arg::with_name("requests")
-            .short("r")
-            .long("requests")
-            .value_name("NUM")
-            .help("Make NUM http requests in parallel")
-            .default_value("100"))
-        .arg(Arg::with_name("database")
-            .short("d")
-            .long("db")
-            .default_value(&cache_dir)
-            .help("Directory where the index is stored"))
-        .arg(Arg::with_name("nixpkgs")
-            .short("f")
-            .long("nixpkgs")
-            .help("Path to nixpkgs for which to build the index, as accepted by nix-env -f")
-            .default_value("<nixpkgs>"))
-        .arg(Arg::with_name("level")
-            .short("c")
-            .long("compression")
-            .help("Zstandard compression level")
-            .default_value("22"))
-        .arg(Arg::with_name("show-trace")
-            .long("show-trace")
-            .help("Show a stack trace in case of Nix expression evaluation errors"))
-        .arg(Arg::with_name("filter-prefix")
-            .long("filter-prefix")
-            .value_name("PREFIX")
-            .help("Only add paths starting with PREFIX (e.g. `/bin/`)"))
-        .arg(Arg::with_name("path-cache")
-             .long("path-cache")
-             .hidden(true)
-             .help("Store and load results of fetch phase in a file called paths.cache.\n\
-                    This speeds up testing different database formats / compression.\n\
-                    Note: does not check if the cached data is up to date! Use only for development."))
-        .get_matches();
-
-    let args = process_args(&matches).unwrap_or_else(|e| e.exit());
+    let args = Args::parse();
 
     if let Err(e) = update_index(&args).await {
         errln!("error: {}", e);

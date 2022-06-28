@@ -7,7 +7,7 @@ use serde::{Deserialize, Serialize};
 use serde_bytes::ByteBuf;
 use std::collections::HashMap;
 use std::io::{self, Write};
-use std::str;
+use std::str::{self, FromStr};
 
 use crate::frcode;
 
@@ -58,11 +58,25 @@ pub enum FileNode<T> {
 /// An exception to this is the `executable` field for the regular type.
 /// This is needed since we present `regular` and `executable` files as different
 /// to the user, so we need a way to represent both types.
-#[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub enum FileType {
     Regular { executable: bool },
     Directory,
     Symlink,
+}
+
+impl FromStr for FileType {
+    type Err = &'static str;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s {
+            "r" => Ok(FileType::Regular { executable: false }),
+            "x" => Ok(FileType::Regular { executable: true }),
+            "d" => Ok(FileType::Directory),
+            "s" => Ok(FileType::Symlink),
+            _ => Err("invalid file type"),
+        }
+    }
 }
 
 /// This lists all file types that can currently be represented.
