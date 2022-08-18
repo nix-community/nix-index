@@ -330,6 +330,7 @@ async fn main() {
             .help("Path to nixpkgs for which to build the index, as accepted by nix-env -f")
             .default_value("<nixpkgs>"))
         .arg(Arg::with_name("system")
+            .short("s")
             .long("system")
             .value_name("platform")
             .takes_value(true)
