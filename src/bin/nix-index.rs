@@ -166,7 +166,7 @@ struct Args {
     jobs: usize,
     database: PathBuf,
     nixpkgs: String,
-    system: String,
+    system: Option<String>,
     compression_level: i32,
     path_cache: bool,
     show_trace: bool,
@@ -191,7 +191,7 @@ async fn update_index(args: &Args) -> Result<()> {
         None => {
             errstln!("+ querying available packages");
             // These are the paths that show up in `nix-env -qa`.
-            let normal_paths = nixpkgs::query_packages(&args.nixpkgs, &args.system, None, args.show_trace);
+            let normal_paths = nixpkgs::query_packages(&args.nixpkgs, args.system.as_deref(), None, args.show_trace);
 
             // We also add some additional sets that only show up in `nix-env -qa -A someSet`.
             //
@@ -211,7 +211,7 @@ async fn update_index(args: &Args) -> Result<()> {
             ];
 
             let all_paths = normal_paths.chain(extra_scopes.iter().flat_map(|scope| {
-                nixpkgs::query_packages(&args.nixpkgs, &args.system, Some(scope), args.show_trace)
+                nixpkgs::query_packages(&args.nixpkgs, args.system.as_deref(), Some(scope), args.show_trace)
             }));
 
             let paths: Vec<StorePath> = all_paths
@@ -293,7 +293,7 @@ fn process_args(matches: &ArgMatches) -> result::Result<Args, clap::Error> {
             .value_of("nixpkgs")
             .expect("nixpkgs arg required")
             .to_string(),
-        system: matches.value_of("system").unwrap_or("").to_string(),
+        system: matches.value_of("system").map(|s| s.to_string()),
         compression_level: value_t!(matches.value_of("level"), i32)?,
         path_cache: matches.is_present("path-cache"),
         show_trace: matches.is_present("show-trace"),

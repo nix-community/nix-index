@@ -24,7 +24,7 @@ use crate::package::{PathOrigin, StorePath};
 /// The function returns an Iterator over the packages returned by nix-env.
 pub fn query_packages(
     nixpkgs: &str,
-    system: &str,
+    system: Option<&str>,
     scope: Option<&str>,
     show_trace: bool,
 ) -> PackagesQuery<ChildStdout> {
@@ -41,7 +41,7 @@ pub fn query_packages(
         .stderr(Stdio::piped())
         .stdin(Stdio::null());
 
-    if !system.is_empty() {
+    if let Some(system) = system {
         cmd.arg("--argstr").arg("system").arg(system);
     }
 
