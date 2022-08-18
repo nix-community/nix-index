@@ -18,6 +18,9 @@ use crate::package::{PathOrigin, StorePath};
 /// The `nixpkgs` argument can either be a path to a nixpkgs checkout or another expression
 /// accepted by `nix-env -f`, such as `<nixpkgs>` or `http://example.org/nixpkgs.tar.bz`.
 ///
+/// If system is `Some(platform)`, nix-env is called with the `--argstr system <platform>` argument so that
+/// the specified platform would be used instead of the default host system platform.
+///
 /// If scope is `Some(attr)`, nix-env is called with the `-A attr` argument so only packages that are a member
 /// of `attr` are returned.
 ///
