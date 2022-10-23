@@ -1,3 +1,6 @@
 target
 /data
 /target-*
+.direnv/
+.envrc
+*.sqlite
