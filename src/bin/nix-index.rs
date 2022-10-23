@@ -128,12 +128,12 @@ async fn update_index(args: &Args) -> Result<()> {
     let mut db = Writer::create(args.database.join("files"), args.compression_level)
         .chain_err(|| ErrorKind::CreateDatabase(args.database.clone()))?;
 
-    let mut results: Vec<(StorePath, FileTree)> = Vec::new();
+    let mut results: Vec<(StorePath, String, FileTree)> = Vec::new();
     while let Some(entry) = files.next().await {
         if args.path_cache {
             results.push(entry.clone());
         }
-        let (path, files) = entry;
+        let (path, _, files) = entry;
         db.add(path, files, args.filter_prefix.as_bytes())
             .chain_err(|| ErrorKind::WriteDatabase(args.database.clone()))?;
     }

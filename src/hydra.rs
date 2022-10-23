@@ -206,6 +206,12 @@ const CONNECT_TIMEOUT_MS: u64 = 10000;
 /// A boxed future using this module's error type.
 type BoxFuture<'a, I> = Pin<Box<dyn Future<Output = Result<I>> + 'a>>;
 
+pub struct ParsedNAR {
+    pub store_path: StorePath,
+    pub nar_path: String,
+    pub references: Vec<StorePath>,
+}
+
 impl Fetcher {
     /// Initializes a new instance of the `Fetcher` struct.
     ///
@@ -343,24 +349,20 @@ impl Fetcher {
     ///
     /// The references will be `None` if no information about the store path could be found
     /// (happens if the narinfo wasn't found which means that hydra didn't build this path).
-    pub fn fetch_references(
-        &self,
-        mut path: StorePath,
-    ) -> BoxFuture<(StorePath, Option<Vec<StorePath>>)> {
+    pub fn fetch_references(&self, mut path: StorePath) -> BoxFuture<Option<ParsedNAR>> {
         let url = format!("{}/{}.narinfo", self.cache_url, path.hash());
 
         let parse_response = move |(url, data)| {
             let url: String = url;
             let data: Vec<u8> = match data {
                 Some(v) => v,
-                None => return Ok((path, None)),
+                None => return Ok(None),
             };
-            let references = b"References:";
-            let store_path = b"StorePath:";
+
+            let mut nar_path = None;
             let mut result = Vec::new();
             for line in data.split(|x| x == &b'\n') {
-                if line.starts_with(references) {
-                    let line = &line[references.len()..];
+                if let Some(line) = line.strip_prefix(b"References: ") {
                     let line = str::from_utf8(line)
                         .map_err(|e| ErrorKind::Unicode(url.clone(), line.to_vec(), e))?;
                     result = line
@@ -378,8 +380,7 @@ impl Fetcher {
                         .collect::<Result<Vec<_>>>()?;
                 }
 
-                if line.starts_with(store_path) {
-                    let line = &line[references.len()..];
+                if let Some(line) = line.strip_prefix(b"StorePath: ") {
                     let line = str::from_utf8(line)
                         .map_err(|e| ErrorKind::Unicode(url.clone(), line.to_vec(), e))?;
                     let line = line.trim();
@@ -387,9 +388,24 @@ impl Fetcher {
                     path = StorePath::parse(path.origin().into_owned(), line)
                         .ok_or_else(|| ErrorKind::ParseStorePath(url.clone(), line.to_string()))?;
                 }
+
+                if let Some(line) = line.strip_prefix(b"URL: ") {
+                    let line = str::from_utf8(line)
+                        .map_err(|e| ErrorKind::Unicode(url.clone(), line.to_vec(), e))?;
+                    let line = line.trim();
+
+                    nar_path = Some(line.to_owned());
+                }
             }
 
-            Ok((path, Some(result)))
+            Ok(Some(ParsedNAR {
+                store_path: path,
+                nar_path: nar_path.ok_or(ErrorKind::ParseStorePath(
+                    url.clone(),
+                    "no URL line found".into(),
+                ))?,
+                references: result,
+            }))
         };
 
         Box::pin(

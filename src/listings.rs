@@ -17,7 +17,7 @@ use crate::workset::{WorkSet, WorkSetHandle, WorkSetWatch};
 /// If a store path has no file listing (for example, because it is not built by hydra),
 /// the file listing will be `None` instead.
 pub type FileListingStream<'a> =
-    Pin<Box<dyn Stream<Item = Result<Option<(StorePath, FileTree)>>> + 'a>>;
+    Pin<Box<dyn Stream<Item = Result<Option<(StorePath, String, FileTree)>>> + 'a>>;
 
 /// Fetches all the file listings for the full closure of the given starting set of path.
 ///
@@ -42,15 +42,18 @@ pub fn fetch_file_listings(
         fetcher
             .fetch_references(path.clone())
             .map_err(|e| Error::with_chain(e, ErrorKind::FetchReferences(path)))
-            .and_then(move |(path, references)| match references {
-                Some(references) => {
-                    for reference in references {
+            .and_then(move |parsed| match parsed {
+                Some(parsed) => {
+                    for reference in parsed.references {
                         let hash = reference.hash().into_owned();
                         handle.add_work(hash, reference);
                     }
+
+                    let path = parsed.store_path;
+                    let nar_path = parsed.nar_path;
                     future::Either::Left(fetcher.fetch_files(&path).map(move |r| match r {
                         Err(e) => Err(Error::with_chain(e, ErrorKind::FetchFiles(path))),
-                        Ok(Some(files)) => Ok(Some((path, files))),
+                        Ok(Some(files)) => Ok(Some((path, nar_path, files))),
                         Ok(None) => Ok(None),
                     }))
                 }
@@ -77,12 +80,12 @@ pub fn try_load_paths_cache() -> Result<Option<(FileListingStream<'static>, Work
     };
 
     let mut input = io::BufReader::new(file);
-    let fetched: Vec<(StorePath, FileTree)> =
+    let fetched: Vec<(StorePath, String, FileTree)> =
         bincode::deserialize_from(&mut input).chain_err(|| ErrorKind::LoadPathsCache)?;
     let workset = WorkSet::from_iter(
         fetched
             .into_iter()
-            .map(|(path, tree)| (path.hash().to_string(), Some((path, tree)))),
+            .map(|(path, nar, tree)| (path.hash().to_string(), Some((path, nar, tree)))),
     );
     let watch = workset.watch();
     let stream = workset.map(|r| {

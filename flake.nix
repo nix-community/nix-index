@@ -22,7 +22,7 @@
         src = self;
 
         nativeBuildInputs = [ pkg-config ];
-        buildInputs = [ openssl curl ]
+        buildInputs = [ openssl curl sqlite ]
           ++ lib.optionals stdenv.hostPlatform.isDarwin [ darwin.apple_sdk.frameworks.Security libiconv ];
         cargoLock = {
           lockFile = ./Cargo.lock;
@@ -52,8 +52,8 @@
 
       RUST_SRC_PATH = "${pkgs.rust.packages.stable.rustPlatform.rustLibSrc}";
 
-      nativeBuildInputs = [ rustc cargo pkg-config  ];
-      buildInputs = [ openssl curl ]
+      nativeBuildInputs = [ rustc cargo pkg-config clippy rustfmt ];
+      buildInputs = [ openssl curl sqlite ]
           ++ lib.optional stdenv.hostPlatform.isDarwin darwin.apple_sdk.frameworks.Security;
       enableParallelBuilding = true;
     });

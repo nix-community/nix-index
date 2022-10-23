@@ -54,6 +54,10 @@ version = "1.14.0"
 version = "3.2.6"
 features = ["derive"]
 
+[dependencies.rusqlite]
+features = ["backup"]
+version = "0.28.0"
+
 [[example]]
 name = "nix-index-debug"
 
