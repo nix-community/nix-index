@@ -101,7 +101,7 @@ impl PathOrigin {
                             attr: attr,
                             output: output,
                             toplevel: toplevel,
-                            system: None
+                            system: None,
                         })
                     })
             })
