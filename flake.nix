@@ -49,6 +49,9 @@
     });
     devShell = forAllSystems (system: with nixpkgsFor.${system}; stdenv.mkDerivation {
       name = "nix-index";
+
+      RUST_SRC_PATH = "${pkgs.rust.packages.stable.rustPlatform.rustLibSrc}";
+
       nativeBuildInputs = [ rustc cargo pkg-config  ];
       buildInputs = [ openssl curl ]
           ++ lib.optional stdenv.hostPlatform.isDarwin darwin.apple_sdk.frameworks.Security;
