@@ -25,6 +25,7 @@ use crate::package::{PathOrigin, StorePath};
 pub fn query_packages(
     nixpkgs: &str,
     scope: Option<&str>,
+    system: &Option<String>,
     show_trace: bool,
 ) -> PackagesQuery<ChildStdout> {
     let mut cmd = Command::new("nix-env");
@@ -46,6 +47,11 @@ pub fn query_packages(
 
     if show_trace {
         cmd.arg("--show-trace");
+    }
+    if let Some(s) = system {
+        cmd.arg("--argstr");
+        cmd.arg("system");
+        cmd.arg(s);
     }
 
     PackagesQuery {

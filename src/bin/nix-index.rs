@@ -168,6 +168,7 @@ struct Args {
     nixpkgs: String,
     compression_level: i32,
     path_cache: bool,
+    system: Option<String>,
     show_trace: bool,
     filter_prefix: String,
 }
@@ -190,7 +191,7 @@ async fn update_index(args: &Args) -> Result<()> {
         None => {
             errstln!("+ querying available packages");
             // These are the paths that show up in `nix-env -qa`.
-            let normal_paths = nixpkgs::query_packages(&args.nixpkgs, None, args.show_trace);
+            let normal_paths = nixpkgs::query_packages(&args.nixpkgs, None, &args.system, args.show_trace);
 
             // We also add some additional sets that only show up in `nix-env -qa -A someSet`.
             //
@@ -210,7 +211,7 @@ async fn update_index(args: &Args) -> Result<()> {
             ];
 
             let all_paths = normal_paths.chain(extra_scopes.iter().flat_map(|scope| {
-                nixpkgs::query_packages(&args.nixpkgs, Some(scope), args.show_trace)
+                nixpkgs::query_packages(&args.nixpkgs, Some(scope), &args.system, args.show_trace)
             }));
 
             let paths: Vec<StorePath> = all_paths
@@ -295,6 +296,7 @@ fn process_args(matches: &ArgMatches) -> result::Result<Args, clap::Error> {
         compression_level: value_t!(matches.value_of("level"), i32)?,
         path_cache: matches.is_present("path-cache"),
         show_trace: matches.is_present("show-trace"),
+        system: matches.value_of("system").map(|s| s.to_string()),
         filter_prefix: matches.value_of("filter-prefix").unwrap_or("").to_string(),
     };
 
@@ -335,6 +337,10 @@ async fn main() {
         .arg(Arg::with_name("show-trace")
             .long("show-trace")
             .help("Show a stack trace in case of Nix expression evaluation errors"))
+        .arg(Arg::with_name("system")
+            .long("system")
+            .value_name("SYSTEM")
+            .help("System to query nix packages for"))
         .arg(Arg::with_name("filter-prefix")
             .long("filter-prefix")
             .value_name("PREFIX")
