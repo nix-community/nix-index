@@ -63,6 +63,12 @@ Or run it once with:
 
 A [`home-manager` module](https://nix-community.github.io/home-manager/options.html#opt-programs.nix-index.enable) is now available to integrate `nix-index` with `bash`, `zsh`, and `fish` using this script.
 
+### Use pre-generated database
+
+[nix-index-database](https://github.com/Mic92/nix-index-database) provides
+pre-generated databases to avoid having to generated databases locally. Those
+databases with the included home-manager and nixos modules.
+
 ## Contributing
 If you find any missing features that you would like to implement, I'm very happy about any PRs! You can also create an issue first if the feature is more complex so we can discuss possible implementations.
 
