@@ -50,6 +50,11 @@ $ nix-env -iA nixos.nix-index
 ## Usage
 First, you need to generate an index by running `nix-index` (it takes around 5 minutes) . Then, you can use `nix-locate pattern`. For more information, see `nix-locate --help` and `nix-index --help`.
 
+### Use pre-generated database
+
+[nix-index-database](https://github.com/Mic92/nix-index-database) provides pre-generated databases if you don't want to generate a database locally.
+It also comes with nixos/home-manager modules to use those databases.
+
 ### Usage as a command-not-found replacement
 
 Nix-index provides a "command-not-found" script that can print for you the attribute path of unfound commands in your shell. You can either source `${pkgs.nix-index}/etc/command-not-found.sh` in your own shell init files (works for ZSH and Bash for as far as we know) or you can use the following in home-manager / `/etc/nixos/configuration.nix`:
