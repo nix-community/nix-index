@@ -20,6 +20,9 @@ use futures::{future, FutureExt, Stream, StreamExt, TryFutureExt};
 use separator::Separatable;
 use std::fs::{self, File};
 use std::io::{self, Write};
+use std::iter;
+use std::sync::mpsc::channel;
+use std::thread;
 use std::iter::FromIterator;
 use std::path::PathBuf;
 use std::pin::Pin;
@@ -188,7 +191,6 @@ async fn update_index(args: &Args) -> Result<()> {
     let (files, watch) = match cached {
         Some(v) => v,
         None => {
-            errstln!("+ querying available packages");
             // These are the paths that show up in `nix-env -qa`.
             let normal_paths = nixpkgs::query_packages(&args.nixpkgs, None, args.show_trace);
 
@@ -207,11 +209,29 @@ async fn update_index(args: &Args) -> Result<()> {
                 "rPackages",
                 "nodePackages",
                 "coqPackages",
-            ];
+            ].iter().map(|scope| nixpkgs::query_packages(&args.nixpkgs, Some(scope), args.show_trace));
 
-            let all_paths = normal_paths.chain(extra_scopes.iter().flat_map(|scope| {
-                nixpkgs::query_packages(&args.nixpkgs, Some(scope), args.show_trace)
-            }));
+            // Collect results in parallel.
+            let rx = {
+                let (tx, rx) = channel();
+                let handles : Vec<thread::JoinHandle<_>> =
+                    iter::once(normal_paths).chain(extra_scopes).map(|path_iter| {
+                        let tx = tx.clone();
+                        thread::spawn(move || {
+                            for path in path_iter {
+                                tx.send(path).unwrap();
+                            }
+                        })
+                    }).collect();
+
+                for h in handles {
+                    h.join().unwrap();
+                }
+
+                rx
+            };
+
+            let all_paths = rx.iter();
 
             let paths: Vec<StorePath> = all_paths
                 .map(|x| x.chain_err(|| ErrorKind::QueryPackages))
@@ -328,10 +348,10 @@ async fn main() {
             .help("Path to nixpkgs for which to build the index, as accepted by nix-env -f")
             .default_value("<nixpkgs>"))
         .arg(Arg::with_name("level")
-            .short("c")
-            .long("compression")
-            .help("Zstandard compression level")
-            .default_value("22"))
+             .short("c")
+             .long("compression")
+             .help("Zstandard compression level")
+             .default_value("19"))
         .arg(Arg::with_name("show-trace")
             .long("show-trace")
             .help("Show a stack trace in case of Nix expression evaluation errors"))

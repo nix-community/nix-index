@@ -24,6 +24,7 @@ http = "0.2.5"
 hyper-proxy = "0.9.1"
 atty = "0.2.14"
 memchr = "2.4.1"
+num_cpus = "1.13.0"
 indexmap = "1.7.0"
 regex = "1.5.4"
 regex-syntax = "0.6.25"
@@ -40,7 +41,7 @@ void = "1.0.2"
 xdg = "2.4.0"
 xml-rs = "0.8.4"
 xz2 = "0.1.6"
-zstd = "0.9.0"
+zstd = { version = "0.9.0", features = [ "zstdmt" ] }
 
 [dependencies.hyper]
 features = ["client", "http1", "http2", "runtime", "stream"]

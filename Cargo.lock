@@ -852,6 +852,7 @@ dependencies = [
  "hyper-proxy",
  "indexmap",
  "memchr",
+ "num_cpus",
  "regex",
  "regex-syntax",
  "separator",
