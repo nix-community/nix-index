@@ -18,12 +18,16 @@ use crate::package::{PathOrigin, StorePath};
 /// The `nixpkgs` argument can either be a path to a nixpkgs checkout or another expression
 /// accepted by `nix-env -f`, such as `<nixpkgs>` or `http://example.org/nixpkgs.tar.bz`.
 ///
+/// If system is `Some(platform)`, nix-env is called with the `--argstr system <platform>` argument so that
+/// the specified platform would be used instead of the default host system platform.
+///
 /// If scope is `Some(attr)`, nix-env is called with the `-A attr` argument so only packages that are a member
 /// of `attr` are returned.
 ///
 /// The function returns an Iterator over the packages returned by nix-env.
 pub fn query_packages(
     nixpkgs: &str,
+    system: Option<&str>,
     scope: Option<&str>,
     show_trace: bool,
 ) -> PackagesQuery<ChildStdout> {
@@ -39,6 +43,10 @@ pub fn query_packages(
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .stdin(Stdio::null());
+
+    if let Some(system) = system {
+        cmd.arg("--argstr").arg("system").arg(system);
+    }
 
     if let Some(scope) = scope {
         cmd.arg("-A").arg(scope);
