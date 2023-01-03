@@ -15,6 +15,20 @@ camlistore.out                                7,938,952 x /nix/store/xn5ivjdyslx
 ```
 ## Installation
 
+### Flakes
+
+1. create the database:
+
+   ```
+   $ nix run github:bennofs/nix-index#nix-index
+   ```
+
+2. query for a file:
+
+   ```
+   $ nix run github:bennofs/nix-index#nix-locate -- bin/hello
+   ```
+
 ### Latest Git version
 
 To install the latest development version of nix-index, simply clone the repo and run `nix-env -if.`:

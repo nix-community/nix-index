@@ -15,7 +15,7 @@
     nixpkgsFor = forAllSystems (system: import nixpkgs { inherit system; });
   in {
     packages = forAllSystems (system: {
-      nix-index = with nixpkgsFor.${system}; rustPlatform.buildRustPackage  {
+      default = with nixpkgsFor.${system}; rustPlatform.buildRustPackage  {
         pname = "nix-index";
         version = "0.1.3";
 
@@ -47,13 +47,23 @@
     checks = forAllSystems (system: {
       nix-index = self.packages.nix-index.${system};
     });
-    defaultPackage = forAllSystems (system: self.packages.${system}.nix-index);
     devShell = forAllSystems (system: with nixpkgsFor.${system}; stdenv.mkDerivation {
       name = "nix-index";
       nativeBuildInputs = [ rustc cargo pkg-config  ];
       buildInputs = [ openssl curl ]
           ++ lib.optional stdenv.hostPlatform.isDarwin darwin.apple_sdk.frameworks.Security;
       enableParallelBuilding = true;
+    });
+    apps = forAllSystems (system: {
+      nix-index = {
+        type = "app";
+        program = "${self.packages.${system}.default}/bin/nix-index";
+      };
+      nix-locate = {
+        type = "app";
+        program = "${self.packages.${system}.default}/bin/nix-locate";
+      };
+      default = self.apps.${system}.nix-locate;
     });
   };
 }
