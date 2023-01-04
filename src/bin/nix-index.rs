@@ -1,20 +1,17 @@
 //! Tool for generating a nix-index database.
-use error_chain::ChainedError;
-use separator::Separatable;
-use stderr::*;
-
-use clap::Parser;
-use futures::{future, StreamExt};
 use std::ffi::OsStr;
 use std::fs::{self, File};
 use std::io::{self, Write};
 use std::iter;
-use std::sync::mpsc::channel;
-use std::thread;
 use std::path::PathBuf;
 use std::process;
 use std::str;
+use std::sync::mpsc::channel;
+use std::thread;
 
+use clap::Parser;
+use error_chain::ChainedError;
+use futures::{future, StreamExt};
 use nix_index::database::Writer;
 use nix_index::errors::*;
 use nix_index::files::FileTree;
@@ -22,6 +19,9 @@ use nix_index::hydra::Fetcher;
 use nix_index::listings::{fetch_file_listings, try_load_paths_cache};
 use nix_index::nixpkgs;
 use nix_index::package::StorePath;
+use nix_index::CACHE_URL;
+use separator::Separatable;
+use stderr::*;
 
 /// The URL of the binary cache that we use to fetch file listings and references.
 ///
@@ -45,7 +45,12 @@ async fn update_index(args: &Args) -> Result<()> {
         Some(v) => v,
         None => {
             // These are the paths that show up in `nix-env -qa`.
-            let normal_paths = nixpkgs::query_packages(&args.nixpkgs, args.system.as_deref(), None, args.show_trace);
+            let normal_paths = nixpkgs::query_packages(
+                &args.nixpkgs,
+                args.system.as_deref(),
+                None,
+                args.show_trace,
+            );
 
             // We also add some additional sets that only show up in `nix-env -qa -A someSet`.
             //
@@ -62,20 +67,31 @@ async fn update_index(args: &Args) -> Result<()> {
                 "rPackages",
                 "nodePackages",
                 "coqPackages",
-            ].iter().map(|scope| nixpkgs::query_packages(&args.nixpkgs, args.system.as_deref(), Some(scope), args.show_trace));
+            ]
+            .iter()
+            .map(|scope| {
+                nixpkgs::query_packages(
+                    &args.nixpkgs,
+                    args.system.as_deref(),
+                    Some(scope),
+                    args.show_trace,
+                )
+            });
 
             // Collect results in parallel.
             let rx = {
                 let (tx, rx) = channel();
-                let handles : Vec<thread::JoinHandle<_>> =
-                    iter::once(normal_paths).chain(extra_scopes).map(|path_iter| {
+                let handles: Vec<thread::JoinHandle<_>> = iter::once(normal_paths)
+                    .chain(extra_scopes)
+                    .map(|path_iter| {
                         let tx = tx.clone();
                         thread::spawn(move || {
                             for path in path_iter {
                                 tx.send(path).unwrap();
                             }
                         })
-                    }).collect();
+                    })
+                    .collect();
 
                 for h in handles {
                     h.join().unwrap();
@@ -155,7 +171,6 @@ async fn update_index(args: &Args) -> Result<()> {
     Ok(())
 }
 
-
 fn cache_dir() -> &'static OsStr {
     let base = xdg::BaseDirectories::with_prefix("nix-index").unwrap();
     let cache_dir = Box::new(base.get_cache_home());
@@ -186,7 +201,7 @@ struct Args {
     /// Zstandard compression level
     #[clap(short, long = "compression", default_value = "22")]
     compression_level: i32,
-    
+
     /// Show a stack trace in the case of a Nix evaluation error
     #[clap(long)]
     show_trace: bool,
@@ -195,7 +210,7 @@ struct Args {
     #[clap(long, default_value = "")]
     filter_prefix: String,
 
-    /// Store and load results of fetch phase in a file called paths.cache. This speeds up testing 
+    /// Store and load results of fetch phase in a file called paths.cache. This speeds up testing
     /// different database formats / compression.
     ///
     /// Note: does not check if the cached data is up to date! Use only for development.

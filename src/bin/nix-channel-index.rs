@@ -1,24 +1,21 @@
 //! Tool for generating a nix-index database.
+use std::ffi::OsString;
+use std::io::{self, Write};
+use std::os::unix::ffi::OsStringExt;
+use std::path::PathBuf;
+use std::process;
+
 use clap::Parser;
 use error_chain::ChainedError;
 use futures::{future, StreamExt};
 use nix_index::files::FileNode;
-use rusqlite::{Connection, DatabaseName};
-use std::ffi::OsString;
-use std::io::{self, Write};
-use stderr::*;
-
-use std::os::unix::ffi::OsStringExt;
-use std::path::PathBuf;
-
-use std::process;
-
-use nix_index::{errors::*, CACHE_URL};
-
 use nix_index::hydra::Fetcher;
 use nix_index::listings::fetch_file_listings;
 use nix_index::nixpkgs;
 use nix_index::package::StorePath;
+use nix_index::{errors::*, CACHE_URL};
+use rusqlite::{Connection, DatabaseName};
+use stderr::*;
 
 const EXTRA_SCOPES: [&str; 5] = [
     "xorg",
@@ -219,7 +216,7 @@ struct Args {
     /// Show a stack trace in the case of a Nix evaluation error
     #[clap(long)]
     show_trace: bool,
- }
+}
 
 #[tokio::main]
 async fn main() {

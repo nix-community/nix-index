@@ -2,12 +2,13 @@
 //!
 //! The main type here is `FileTree` which represents
 //! such as the file listing for a store path.
-use memchr::memchr;
-use serde::{Deserialize, Serialize};
-use serde_bytes::ByteBuf;
 use std::collections::HashMap;
 use std::io::{self, Write};
 use std::str::{self, FromStr};
+
+use memchr::memchr;
+use serde::{Deserialize, Serialize};
+use serde_bytes::ByteBuf;
 
 use crate::frcode;
 

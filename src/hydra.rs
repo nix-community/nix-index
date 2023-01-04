@@ -3,8 +3,15 @@
 //! This module has all functions that deal with accessing hydra or the binary cache.
 //! Currently, it only provides two functions: `fetch_files` to get the file listing for
 //! a store path and `fetch_references` to retrieve the references from the narinfo.
-use serde::{self, Deserialize};
-use serde_json;
+use std::collections::HashMap;
+use std::env::var;
+use std::fmt;
+use std::io::{self, Write};
+use std::path::PathBuf;
+use std::pin::Pin;
+use std::result;
+use std::str::{self, FromStr, Utf8Error};
+use std::time::{Duration, Instant};
 
 use brotli2::write::BrotliDecoder;
 use error_chain::error_chain;
@@ -15,16 +22,9 @@ use hyper::client::{Client as HyperClient, HttpConnector};
 use hyper::{self, Body, Request, StatusCode, Uri};
 use hyper_proxy::{Custom, Intercept, Proxy, ProxyConnector};
 use serde::de::{Deserializer, MapAccess, Visitor};
+use serde::{self, Deserialize};
 use serde_bytes::ByteBuf;
-use std::collections::HashMap;
-use std::env::var;
-use std::fmt;
-use std::io::{self, Write};
-use std::path::PathBuf;
-use std::pin::Pin;
-use std::result;
-use std::str::{self, FromStr, Utf8Error};
-use std::time::{Duration, Instant};
+use serde_json;
 use tokio::time::error::Elapsed;
 use tokio::time::timeout;
 use tokio_retry::strategy::ExponentialBackoff;

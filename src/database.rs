@@ -1,3 +1,11 @@
+use std::fs::File;
+/// Creating and searching file databases.
+///
+/// This module implements an abstraction for creating an index of files with meta information
+/// and searching that index for paths matching a specific pattern.
+use std::io::{self, BufReader, BufWriter, Read, Seek, SeekFrom, Write};
+use std::path::Path;
+
 use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
 use error_chain::error_chain;
 use grep::matcher::{LineMatchKind, Match, Matcher, NoError};
@@ -8,13 +16,6 @@ use regex_syntax::ast::{
     Alternation, Assertion, AssertionKind, Ast, Concat, Group, Literal, Repetition,
 };
 use serde_json;
-use std::fs::File;
-/// Creating and searching file databases.
-///
-/// This module implements an abstraction for creating an index of files with meta information
-/// and searching that index for paths matching a specific pattern.
-use std::io::{self, BufReader, BufWriter, Read, Seek, SeekFrom, Write};
-use std::path::Path;
 use zstd;
 
 use crate::files::{FileTree, FileTreeEntry};

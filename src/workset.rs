@@ -52,8 +52,6 @@
 //!    // and pkgD itself
 //! }
 //! ```
-use futures::Stream;
-use indexmap::IndexMap;
 use std::cell::RefCell;
 use std::collections::HashSet;
 use std::hash::Hash;
@@ -61,6 +59,9 @@ use std::iter::FromIterator;
 use std::pin::Pin;
 use std::rc::{Rc, Weak};
 use std::task::{Context, Poll};
+
+use futures::Stream;
+use indexmap::IndexMap;
 
 /// This structure holds the internal state of our queue.
 struct Shared<K, V> {

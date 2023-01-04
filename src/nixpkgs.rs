@@ -7,6 +7,7 @@ use std::error;
 use std::fmt;
 use std::io::{self, Read};
 use std::process::{Child, ChildStdout, Command, Stdio};
+
 use xml;
 use xml::common::{Position, TextPosition};
 use xml::reader::{EventReader, XmlEvent};
