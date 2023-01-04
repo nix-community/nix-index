@@ -4,6 +4,7 @@ use std::iter::FromIterator;
 use std::pin::Pin;
 
 use futures::{future, FutureExt, Stream, StreamExt, TryFutureExt};
+use rayon::prelude::{IntoParallelRefIterator, ParallelIterator};
 
 use crate::errors::{Error, ErrorKind, Result, ResultExt};
 use crate::files::FileTree;
@@ -11,6 +12,23 @@ use crate::hydra::Fetcher;
 use crate::nixpkgs;
 use crate::package::StorePath;
 use crate::workset::{WorkSet, WorkSetHandle, WorkSetWatch};
+
+// We also add some additional sets that only show up in `nix-env -qa -A someSet`.
+//
+// Some of these sets are not build directly by hydra. We still include them here
+// since parts of these sets may be build as dependencies of other packages
+// that are build by hydra. This way, our attribute path information is more
+// accurate.
+//
+// We only need sets that are not marked "recurseIntoAttrs" here, since if they are,
+// they are already part of normal_paths.
+pub const EXTRA_SCOPES: [&str; 5] = [
+    "xorg",
+    "haskellPackages",
+    "rPackages",
+    "nodePackages",
+    "coqPackages",
+];
 
 /// A stream of store paths (packages) with their associated file listings.
 ///
@@ -27,7 +45,7 @@ pub type FileListingStream<'a> =
 ///
 /// The `jobs` argument is used to specify how many requests should be done in parallel. No more than
 /// `jobs` requests will be in-flight at any given time.
-pub fn fetch_file_listings(
+fn fetch_listings_impl(
     fetcher: &Fetcher,
     jobs: usize,
     starting_set: Vec<StorePath>,
@@ -94,4 +112,33 @@ pub fn try_load_paths_cache() -> Result<Option<(FileListingStream<'static>, Work
     });
 
     Ok(Some((Box::pin(stream), watch)))
+}
+
+pub fn fetch_listings<'a>(
+    fetcher: &'a Fetcher,
+    jobs: usize,
+    nixpkgs: &str,
+    systems: Vec<Option<&str>>,
+    show_trace: bool,
+) -> Result<(FileListingStream<'a>, WorkSetWatch)> {
+    let mut scopes = vec![None];
+    scopes.extend(EXTRA_SCOPES.map(Some));
+
+    let mut all_queries = vec![];
+    for system in systems {
+        for scope in &scopes {
+            all_queries.push((system, scope));
+        }
+    }
+
+    // Collect results in parallel.
+    let all_paths = all_queries
+        .par_iter()
+        .flat_map_iter(|&(system, scope)| {
+            nixpkgs::query_packages(nixpkgs, system, scope.as_deref(), show_trace)
+                .map(|x| x.chain_err(|| ErrorKind::QueryPackages))
+        })
+        .collect::<Result<_>>()?;
+
+    Ok(fetch_listings_impl(fetcher, jobs, all_paths))
 }

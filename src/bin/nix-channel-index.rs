@@ -10,20 +10,10 @@ use error_chain::ChainedError;
 use futures::{future, StreamExt};
 use nix_index::files::FileNode;
 use nix_index::hydra::Fetcher;
-use nix_index::listings::fetch_file_listings;
-use nix_index::nixpkgs;
-use nix_index::package::StorePath;
+use nix_index::listings::fetch_listings;
 use nix_index::{errors::*, CACHE_URL};
 use rusqlite::{Connection, DatabaseName};
 use stderr::*;
-
-const EXTRA_SCOPES: [&str; 5] = [
-    "xorg",
-    "haskellPackages",
-    "rPackages",
-    "nodePackages",
-    "coqPackages",
-];
 
 /// The main function of this module: creates a new command-not-found database.
 async fn update_index(args: &Args) -> Result<()> {
@@ -62,39 +52,13 @@ async fn update_index(args: &Args) -> Result<()> {
         .map_err(|_| ErrorKind::CreateDatabase(args.debug_output.clone()))?;
 
     let systems = match &args.systems {
-        Some(x) => x.iter().map(|x| Some(x.as_str())).collect(),
+        Some(systems) => systems.iter().map(|x| Some(x.as_str())).collect(),
         None => vec![None],
     };
 
-    let (files, watch) = {
-        errstln!("+ querying available packages");
-
-        let all_paths = systems.into_iter().flat_map(|system| {
-            // These are the paths that show up in `nix-env -qa`.
-            let normal_paths =
-                nixpkgs::query_packages(&args.nixpkgs, system, None, args.show_trace);
-
-            // We also add some additional sets that only show up in `nix-env -qa -A someSet`.
-            //
-            // Some of these sets are not build directly by hydra. We still include them here
-            // since parts of these sets may be build as dependencies of other packages
-            // that are build by hydra. This way, our attribute path information is more
-            // accurate.
-            //
-            // We only need sets that are not marked "recurseIntoAttrs" here, since if they are,
-            // they are already part of normal_paths.
-
-            normal_paths.chain(EXTRA_SCOPES.iter().flat_map(move |scope| {
-                nixpkgs::query_packages(&args.nixpkgs, system, Some(scope), args.show_trace)
-            }))
-        });
-
-        let paths: Vec<StorePath> = all_paths
-            .map(|x| x.chain_err(|| ErrorKind::QueryPackages))
-            .collect::<Result<_>>()?;
-
-        fetch_file_listings(&fetcher, args.jobs, paths)
-    };
+    errstln!("+ querying available packages");
+    let (files, watch) =
+        fetch_listings(&fetcher, args.jobs, &args.nixpkgs, systems, args.show_trace)?;
 
     // Treat request errors as if the file list were missing
     let files = files.map(|r| {

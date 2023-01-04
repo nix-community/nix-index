@@ -2,12 +2,8 @@
 use std::ffi::OsStr;
 use std::fs::{self, File};
 use std::io::{self, Write};
-use std::iter;
 use std::path::PathBuf;
 use std::process;
-use std::str;
-use std::sync::mpsc::channel;
-use std::thread;
 
 use clap::Parser;
 use error_chain::ChainedError;
@@ -16,17 +12,11 @@ use nix_index::database::Writer;
 use nix_index::errors::*;
 use nix_index::files::FileTree;
 use nix_index::hydra::Fetcher;
-use nix_index::listings::{fetch_file_listings, try_load_paths_cache};
-use nix_index::nixpkgs;
+use nix_index::listings::{fetch_listings, try_load_paths_cache};
 use nix_index::package::StorePath;
 use nix_index::CACHE_URL;
 use separator::Separatable;
 use stderr::*;
-
-/// The URL of the binary cache that we use to fetch file listings and references.
-///
-/// Hardcoded for now, but may be made a configurable option in the future.
-const CACHE_URL: &str = "http://cache.nixos.org";
 
 /// The main function of this module: creates a new nix-index database.
 async fn update_index(args: &Args) -> Result<()> {
@@ -40,73 +30,17 @@ async fn update_index(args: &Args) -> Result<()> {
         None
     };
 
+    errstln!("+ querying available packages");
     let fetcher = Fetcher::new(CACHE_URL.to_string()).map_err(ErrorKind::ParseProxy)?;
     let (files, watch) = match cached {
         Some(v) => v,
-        None => {
-            // These are the paths that show up in `nix-env -qa`.
-            let normal_paths = nixpkgs::query_packages(
-                &args.nixpkgs,
-                args.system.as_deref(),
-                None,
-                args.show_trace,
-            );
-
-            // We also add some additional sets that only show up in `nix-env -qa -A someSet`.
-            //
-            // Some of these sets are not build directly by hydra. We still include them here
-            // since parts of these sets may be build as dependencies of other packages
-            // that are build by hydra. This way, our attribute path information is more
-            // accurate.
-            //
-            // We only need sets that are not marked "recurseIntoAttrs" here, since if they are,
-            // they are already part of normal_paths.
-            let extra_scopes = [
-                "xorg",
-                "haskellPackages",
-                "rPackages",
-                "nodePackages",
-                "coqPackages",
-            ]
-            .iter()
-            .map(|scope| {
-                nixpkgs::query_packages(
-                    &args.nixpkgs,
-                    args.system.as_deref(),
-                    Some(scope),
-                    args.show_trace,
-                )
-            });
-
-            // Collect results in parallel.
-            let rx = {
-                let (tx, rx) = channel();
-                let handles: Vec<thread::JoinHandle<_>> = iter::once(normal_paths)
-                    .chain(extra_scopes)
-                    .map(|path_iter| {
-                        let tx = tx.clone();
-                        thread::spawn(move || {
-                            for path in path_iter {
-                                tx.send(path).unwrap();
-                            }
-                        })
-                    })
-                    .collect();
-
-                for h in handles {
-                    h.join().unwrap();
-                }
-
-                rx
-            };
-
-            let all_paths = rx.iter();
-
-            let paths: Vec<StorePath> = all_paths
-                .map(|x| x.chain_err(|| ErrorKind::QueryPackages))
-                .collect::<Result<_>>()?;
-            fetch_file_listings(&fetcher, args.jobs, paths)
-        }
+        None => fetch_listings(
+            &fetcher,
+            args.jobs,
+            &args.nixpkgs,
+            vec![args.system.as_deref()],
+            args.show_trace,
+        )?,
     };
 
     // Treat request errors as if the file list were missing
