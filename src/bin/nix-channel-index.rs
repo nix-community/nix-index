@@ -158,7 +158,7 @@ async fn update_index(args: &Args) -> Result<()> {
 #[clap(author, about, version)]
 struct Args {
     /// Make REQUESTS http requests in parallel
-    #[clap(short = 'r', long = "requests", default_value = "100")]
+    #[clap(short = 'r', long = "requests", default_value = "500")]
     jobs: usize,
 
     /// Path to nixpkgs for which to build the index, as accepted by nix-env -f
