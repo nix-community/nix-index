@@ -38,7 +38,7 @@ pub fn query_packages(
         .arg("--xml")
         .arg("--arg")
         .arg("config")
-        .arg("{}") // override default nixpkgs config discovery
+        .arg("{ allowAliases = false; }") // override default nixpkgs config discovery
         .arg("--file")
         .arg(nixpkgs)
         .stdout(Stdio::piped())
