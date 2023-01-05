@@ -4,6 +4,8 @@ use std::iter::FromIterator;
 use std::pin::Pin;
 
 use futures::{future, FutureExt, Stream, StreamExt, TryFutureExt};
+use indexmap::IndexMap;
+use indexmap::map::Entry;
 use rayon::prelude::{IntoParallelRefIterator, ParallelIterator};
 
 use crate::errors::{Error, ErrorKind, Result, ResultExt};
@@ -52,7 +54,25 @@ fn fetch_listings_impl(
 ) -> (FileListingStream, WorkSetWatch) {
     // Create the queue that will hold all the paths that still need processing.
     // Initially, only the starting set needs processing.
-    let workset = WorkSet::from_iter(starting_set.into_iter().map(|x| (x.hash().into_owned(), x)));
+
+    // We can't use FromIterator here as we want shorter paths to win
+    let mut map: IndexMap<String, StorePath> = IndexMap::with_capacity(starting_set.len());
+
+    for path in starting_set {
+        let hash = path.hash().into();
+        match map.entry(hash) {
+            Entry::Occupied(mut e) => {
+                if e.get().origin().attr.len() > path.origin().attr.len() {
+                    e.insert(path);
+                }
+            },
+            Entry::Vacant(e) => {
+                e.insert(path);
+            },
+        };
+    }
+
+    let workset = WorkSet::from_queue(map);
 
     // Processes a single store path, fetching the file listing for it and
     // adding its references to the queue
