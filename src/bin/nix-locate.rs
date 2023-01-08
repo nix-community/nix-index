@@ -11,7 +11,6 @@ use std::process;
 use std::result;
 use std::str;
 use std::str::FromStr;
-use stderr::{err, errln};
 
 use nix_index::database;
 use nix_index::files::{self, FileTreeEntry, FileType};
@@ -320,14 +319,14 @@ fn main() {
     let args = process_args(args).unwrap_or_else(|e| e.exit());
 
     if let Err(e) = locate(&args) {
-        errln!("error: {}", e);
+        eprintln!("error: {}", e);
 
         for e in e.iter().skip(1) {
-            errln!("caused by: {}", e);
+            eprintln!("caused by: {}", e);
         }
 
         if let Some(backtrace) = e.backtrace() {
-            errln!("backtrace: {:?}", backtrace);
+            eprintln!("backtrace: {:?}", backtrace);
         }
         process::exit(2);
     }

@@ -2,7 +2,6 @@
 
 use error_chain::{error_chain, ChainedError};
 use separator::Separatable;
-use stderr::*;
 
 use clap::Parser;
 use futures::{future, FutureExt, Stream, StreamExt, TryFutureExt};
@@ -158,7 +157,7 @@ async fn update_index(args: &Args) -> Result<()> {
     // the packages normally. Also fall back to normal querying if the paths.cache
     // fails to load.
     let cached = if args.path_cache {
-        errstln!("+ loading paths from cache");
+        eprintln!("+ loading paths from cache");
         try_load_paths_cache()?
     } else {
         None
@@ -220,7 +219,7 @@ async fn update_index(args: &Args) -> Result<()> {
     // Treat request errors as if the file list were missing
     let files = files.map(|r| {
         r.unwrap_or_else(|e| {
-            errst!("\n{}", e.display_chain());
+            eprint!("\n{}", e.display_chain());
             None
         })
     });
@@ -234,7 +233,7 @@ async fn update_index(args: &Args) -> Result<()> {
             missing += 1;
         };
 
-        errst!("+ generating index: {:05} paths found :: {:05} paths not in binary cache :: {:05} paths in queue \r",
+        eprint!("+ generating index: {:05} paths found :: {:05} paths not in binary cache :: {:05} paths in queue \r",
                indexed, missing, watch.queue_len());
         io::stderr().flush().expect("flushing stderr failed");
     });
@@ -242,11 +241,11 @@ async fn update_index(args: &Args) -> Result<()> {
     // Filter packages with no file listings available
     let mut files = files.filter_map(future::ready);
 
-    errst!("+ generating index");
+    eprint!("+ generating index");
     if !args.filter_prefix.is_empty() {
-        errst!(" (filtering by `{}`)", args.filter_prefix);
+        eprint!(" (filtering by `{}`)", args.filter_prefix);
     }
-    errst!("\r");
+    eprint!("\r");
     fs::create_dir_all(&args.database)
         .chain_err(|| ErrorKind::CreateDatabaseDir(args.database.clone()))?;
     let mut db = database::Writer::create(args.database.join("files"), args.compression_level)
@@ -261,10 +260,10 @@ async fn update_index(args: &Args) -> Result<()> {
         db.add(path, files, args.filter_prefix.as_bytes())
             .chain_err(|| ErrorKind::WriteDatabase(args.database.clone()))?;
     }
-    errstln!("");
+    eprintln!("");
 
     if args.path_cache {
-        errstln!("+ writing path cache");
+        eprintln!("+ writing path cache");
         let mut output = io::BufWriter::new(
             File::create("paths.cache").chain_err(|| ErrorKind::WritePathsCache)?,
         );
@@ -274,7 +273,7 @@ async fn update_index(args: &Args) -> Result<()> {
     let index_size = db
         .finish()
         .chain_err(|| ErrorKind::WriteDatabase(args.database.clone()))?;
-    errstln!("+ wrote index of {} bytes", index_size.separated_string());
+    eprintln!("+ wrote index of {} bytes", index_size.separated_string());
 
     Ok(())
 }
@@ -332,14 +331,14 @@ async fn main() {
     let args = Args::parse();
 
     if let Err(e) = update_index(&args).await {
-        errln!("error: {}", e);
+        eprintln!("error: {}", e);
 
         for e in e.iter().skip(1) {
-            errln!("caused by: {}", e);
+            eprintln!("caused by: {}", e);
         }
 
         if let Some(backtrace) = e.backtrace() {
-            errln!("backtrace: {:?}", backtrace);
+            eprintln!("backtrace: {:?}", backtrace);
         }
         process::exit(2);
     }
