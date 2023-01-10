@@ -1,0 +1,4 @@
+[advisories]
+ignore = [
+  "RUSTSEC-2021-0139" # ansi_term is unmaintained, but quite small, so maintenance not critical
+]
