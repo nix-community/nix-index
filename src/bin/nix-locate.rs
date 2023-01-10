@@ -260,7 +260,7 @@ struct Opts {
 
     /// Only print matches for files that have this type. If the option is given multiple times,
     /// a file will be printed if it has any of the given types.
-    #[clap(short, long, possible_values=["d", "x", "r", "s"])]
+    #[clap(short, long, value_parser=["d", "x", "r", "s"])]
     r#type: Option<Vec<FileType>>,
 
     /// Disables grouping of paths with the same matching part. By default, a path will only be
@@ -272,7 +272,7 @@ struct Opts {
     no_group: bool,
 
     /// Whether to use colors in output. If auto, only use colors if outputting to a terminal.
-    #[clap(long, arg_enum, default_value = "auto")]
+    #[clap(long, value_enum, default_value = "auto")]
     color: Color,
 
     /// Only print matches for files or directories whose basename matches PATTERN exactly.
@@ -293,7 +293,7 @@ struct Opts {
     minimal: bool,
 }
 
-#[derive(clap::ArgEnum, Clone, Copy, Debug)]
+#[derive(clap::ValueEnum, Clone, Copy, Debug)]
 enum Color {
     Always,
     Never,
