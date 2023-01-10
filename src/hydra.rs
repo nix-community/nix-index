@@ -12,8 +12,7 @@ use std::pin::Pin;
 use std::result;
 use std::str::{self, FromStr, Utf8Error};
 use std::time::{Duration, Instant};
-
-use brotli2::write::BrotliDecoder;
+use brotli_decompressor::BrotliDecompress;
 use error_chain::error_chain;
 use futures::future::{self, Either};
 use futures::{Future, TryFutureExt};
@@ -314,17 +313,17 @@ impl Fetcher {
             }
 
             Brotli => {
-                let mut decoder = BrotliDecoder::new(Vec::new());
+                let mut encoded = Vec::new();
                 while let Some(v) = content.next().await {
                     let v = v.map_err(|_e| ErrorKind::Timeout)??;
-                    decoder
-                        .write_all(&v)
-                        .chain_err(|| ErrorKind::Decode(url.clone()))?;
+                    encoded.extend(v);
                 }
-
-                decoder
-                    .finish()
-                    .chain_err(|| ErrorKind::Decode(url.clone()))?
+                // a few tests suggest that the compression ratio for file listings
+                // is about 1:10
+                let mut decoded = Vec::with_capacity(10 * encoded.len());
+                BrotliDecompress(&mut encoded.as_slice(), &mut decoded)
+                    .chain_err(|| ErrorKind::Decode(url.clone()))?;
+                decoded
             }
 
             Identity => {
