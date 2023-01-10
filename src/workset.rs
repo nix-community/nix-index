@@ -52,8 +52,6 @@
 //!    // and pkgD itself
 //! }
 //! ```
-use futures::Stream;
-use indexmap::IndexMap;
 use std::cell::RefCell;
 use std::collections::HashSet;
 use std::hash::Hash;
@@ -61,6 +59,9 @@ use std::iter::FromIterator;
 use std::pin::Pin;
 use std::rc::{Rc, Weak};
 use std::task::{Context, Poll};
+
+use futures::Stream;
+use indexmap::IndexMap;
 
 /// This structure holds the internal state of our queue.
 struct Shared<K, V> {
@@ -170,18 +171,23 @@ impl<K: Hash + Eq + 'static, V: 'static> WorkSet<K, V> {
             state: Rc::downgrade(&self.state),
         })
     }
-}
 
-/// Constructs a new work set with the given initial work items.
-impl<K: Hash + Eq + 'static, V: 'static> FromIterator<(K, V)> for WorkSet<K, V> {
-    fn from_iter<I: IntoIterator<Item = (K, V)>>(iter: I) -> WorkSet<K, V> {
+    /// Constructs a new work set with the given initial work items.
+    pub fn from_queue(queue: IndexMap<K, V>) -> Self {
         let shared = Shared {
             seen: HashSet::new(),
-            queue: IndexMap::from_iter(iter),
+            queue,
         };
-        WorkSet {
+
+        Self {
             state: Rc::new(RefCell::new(shared)),
         }
+    }
+}
+
+impl<K: Hash + Eq + 'static, V: 'static> FromIterator<(K, V)> for WorkSet<K, V> {
+    fn from_iter<I: IntoIterator<Item = (K, V)>>(iter: I) -> WorkSet<K, V> {
+        Self::from_queue(IndexMap::from_iter(iter))
     }
 }
 

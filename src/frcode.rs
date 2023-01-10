@@ -52,11 +52,12 @@
 //! The last entry shares four bytes less than the second to last one did with its predecessor, so here the differential is negative.
 //!
 //! Through this encoding, the size of the index is typically reduces by a factor of 3 to 5.
-use error_chain::{bail, error_chain};
-use memchr;
 use std::cmp;
 use std::io::{self, BufRead, Write};
 use std::ops::{Deref, DerefMut};
+
+use error_chain::{bail, error_chain};
+use memchr;
 
 error_chain! {
     foreign_links {

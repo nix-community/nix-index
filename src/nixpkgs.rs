@@ -7,6 +7,7 @@ use std::error;
 use std::fmt;
 use std::io::{self, Read};
 use std::process::{Child, ChildStdout, Command, Stdio};
+
 use xml;
 use xml::common::{Position, TextPosition};
 use xml::reader::{EventReader, XmlEvent};
@@ -37,7 +38,7 @@ pub fn query_packages(
         .arg("--xml")
         .arg("--arg")
         .arg("config")
-        .arg("{}")
+        .arg("{ allowAliases = false; }") // override default nixpkgs config discovery
         .arg("--file")
         .arg(nixpkgs)
         .stdout(Stdio::piped())
@@ -146,7 +147,7 @@ impl Iterator for PackagesQuery<ChildStdout> {
 /// Parses the XML output of `nix-env` and returns individual store paths.
 struct PackagesParser<R: Read> {
     events: EventReader<R>,
-    current_item: Option<String>,
+    current_item: Option<(String, String)>,
 }
 
 /// A parser error that may occur during parsing `nix-env`'s output.
@@ -288,9 +289,21 @@ impl<R: Read> PackagesParser<R> {
                             }));
                         }
 
-                        let attr_path = attributes
-                            .into_iter()
-                            .find(|a| a.name.local_name == "attrPath");
+                        let mut attr_path = None;
+                        let mut system = None;
+
+                        for attr in attributes {
+                            if attr.name.local_name == "attrPath" {
+                                attr_path = Some(attr.value);
+                                continue;
+                            }
+
+                            if attr.name.local_name == "system" {
+                                system = Some(attr.value);
+                                continue;
+                            }
+                        }
+
                         let attr_path = attr_path.ok_or_else(|| {
                             self.err(MissingAttribute {
                                 element_name: "item".into(),
@@ -298,12 +311,19 @@ impl<R: Read> PackagesParser<R> {
                             })
                         })?;
 
-                        self.current_item = Some(attr_path.value);
+                        let system = system.ok_or_else(|| {
+                            self.err(MissingAttribute {
+                                element_name: "item".into(),
+                                attribute_name: "system".into(),
+                            })
+                        })?;
+
+                        self.current_item = Some((attr_path, system));
                         continue;
                     }
 
                     if element_name.local_name == "output" {
-                        if let Some(item) = self.current_item.clone() {
+                        if let Some((item, system)) = self.current_item.clone() {
                             let mut output_name = None;
                             let mut output_path = None;
 
@@ -337,6 +357,7 @@ impl<R: Read> PackagesParser<R> {
                                 attr: item,
                                 output: output_name,
                                 toplevel: true,
+                                system: Some(system),
                             };
                             let store_path = StorePath::parse(origin, &output_path);
                             let store_path = store_path

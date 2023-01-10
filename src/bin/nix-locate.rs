@@ -1,9 +1,4 @@
 //! Tool for searching for files in nixpkgs packages
-use ansi_term::Colour::Red;
-use clap::Parser;
-use error_chain::error_chain;
-use regex::bytes::Regex;
-use separator::Separatable;
 use std::collections::HashSet;
 use std::ffi::OsStr;
 use std::path::PathBuf;
@@ -11,10 +6,15 @@ use std::process;
 use std::result;
 use std::str;
 use std::str::FromStr;
-use stderr::{err, errln};
 
+use ansi_term::Colour::Red;
+use clap::Parser;
+use error_chain::error_chain;
 use nix_index::database;
 use nix_index::files::{self, FileTreeEntry, FileType};
+use regex::bytes::Regex;
+use separator::Separatable;
+use stderr::{err, errln};
 
 error_chain! {
     errors {
@@ -259,7 +259,7 @@ struct Opts {
     #[clap(long)]
     top_level: bool,
 
-    /// Only print matches for files that have this type. If the option is given multiple times, 
+    /// Only print matches for files that have this type. If the option is given multiple times,
     /// a file will be printed if it has any of the given types.
     #[clap(short, long, possible_values=["d", "x", "r", "s"])]
     r#type: Option<Vec<FileType>>,

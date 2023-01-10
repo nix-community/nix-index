@@ -40,6 +40,9 @@ pub struct PathOrigin {
     /// which top-level path they will refer to though if there exist multiple ones whose closure
     /// contains this path.
     pub toplevel: bool,
+
+    /// Target system
+    pub system: Option<String>,
 }
 
 impl PathOrigin {
@@ -98,6 +101,7 @@ impl PathOrigin {
                             attr: attr,
                             output: output,
                             toplevel: toplevel,
+                            system: None,
                         })
                     })
             })
@@ -200,7 +204,7 @@ impl StorePath {
     /// ```
     /// use nix_index::package::{PathOrigin, StorePath};
     ///
-    /// let origin = PathOrigin { attr: "dummy".to_string(), output: "out".to_string(), toplevel: true };
+    /// let origin = PathOrigin { attr: "dummy".to_string(), output: "out".to_string(), toplevel: true, system: None };
     /// let store_path = StorePath::parse(origin, "/nix/store/010yd8jls8w4vcnql4zhjbnyp2yay5pl-bash-4.4-p5").unwrap();
     /// assert_eq!(&store_path.name(), "bash-4.4-p5");
     /// ```
@@ -216,7 +220,7 @@ impl StorePath {
     /// ```
     /// use nix_index::package::{PathOrigin, StorePath};
     ///
-    /// let origin = PathOrigin { attr: "dummy".to_string(), output: "out".to_string(), toplevel: true };
+    /// let origin = PathOrigin { attr: "dummy".to_string(), output: "out".to_string(), toplevel: true, system: None };
     /// let store_path = StorePath::parse(origin, "/nix/store/010yd8jls8w4vcnql4zhjbnyp2yay5pl-bash-4.4-p5").unwrap();
     /// assert_eq!(&store_path.name(), "bash-4.4-p5");
     /// ```
@@ -234,7 +238,7 @@ impl StorePath {
     /// ```
     /// use nix_index::package::{PathOrigin, StorePath};
     ///
-    /// let origin = PathOrigin { attr: "dummy".to_string(), output: "out".to_string(), toplevel: true };
+    /// let origin = PathOrigin { attr: "dummy".to_string(), output: "out".to_string(), toplevel: true, system: None };
     /// let store_path = StorePath::parse(origin, "/nix/store/010yd8jls8w4vcnql4zhjbnyp2yay5pl-bash-4.4-p5").unwrap();
     /// assert_eq!(&store_path.store_dir(), "/nix/store");
     /// ```
@@ -249,7 +253,7 @@ impl StorePath {
     /// ```
     /// use nix_index::package::{PathOrigin, StorePath};
     ///
-    /// let origin = PathOrigin { attr: "dummy".to_string(), output: "out".to_string(), toplevel: true };
+    /// let origin = PathOrigin { attr: "dummy".to_string(), output: "out".to_string(), toplevel: true, system: None };
     /// let store_path = StorePath::parse(origin, "/nix/store/010yd8jls8w4vcnql4zhjbnyp2yay5pl-bash-4.4-p5").unwrap();
     /// assert_eq!(&store_path.as_str(), "/nix/store/010yd8jls8w4vcnql4zhjbnyp2yay5pl-bash-4.4-p5");
     /// ```
@@ -266,7 +270,7 @@ impl StorePath {
     /// ```
     /// use nix_index::package::{PathOrigin, StorePath};
     ///
-    /// let origin = PathOrigin { attr: "dummy".to_string(), output: "out".to_string(), toplevel: true };
+    /// let origin = PathOrigin { attr: "dummy".to_string(), output: "out".to_string(), toplevel: true, system: None };
     /// let store_path = StorePath::parse(origin.clone(), "/nix/store/010yd8jls8w4vcnql4zhjbnyp2yay5pl-bash-4.4-p5").unwrap();
     /// assert_eq!(store_path.origin().as_ref(), &origin);
     /// ```
