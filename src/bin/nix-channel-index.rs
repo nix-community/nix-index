@@ -1,4 +1,4 @@
-//! Tool for generating a nix-index database.
+//! Toor for generating a nix-index database.
 use std::ffi::OsString;
 use std::io::{self, Write};
 use std::os::unix::ffi::OsStringExt;
@@ -13,7 +13,6 @@ use nix_index::hydra::Fetcher;
 use nix_index::listings::fetch_listings;
 use nix_index::{errors::*, CACHE_URL};
 use rusqlite::{Connection, DatabaseName};
-use stderr::*;
 
 /// The main function of this module: creates a new command-not-found database.
 async fn update_index(args: &Args) -> Result<()> {
@@ -56,14 +55,14 @@ async fn update_index(args: &Args) -> Result<()> {
         None => vec![None],
     };
 
-    errstln!("+ querying available packages");
+    eprint!("+ querying available packages");
     let (files, watch) =
         fetch_listings(&fetcher, args.jobs, &args.nixpkgs, systems, args.show_trace)?;
 
     // Treat request errors as if the file list were missing
     let files = files.map(|r| {
         r.unwrap_or_else(|e| {
-            errst!("\n{}", e.display_chain());
+            eprint!("\n{}", e.display_chain());
             None
         })
     });
@@ -77,15 +76,15 @@ async fn update_index(args: &Args) -> Result<()> {
             missing += 1;
         };
 
-        errst!("+ generating index: {:05} paths found :: {:05} paths not in binary cache :: {:05} paths in queue \r",
+        eprint!("+ generating index: {:05} paths found :: {:05} paths not in binary cache :: {:05} paths in queue \r",
                indexed, missing, watch.queue_len());
         io::stderr().flush().expect("flushing stderr failed");
     });
 
     let mut files = files.filter_map(future::ready);
 
-    errst!("+ generating index");
-    errst!("\r");
+    eprint!("+ generating index");
+    eprint!("\r");
 
     while let Some((path, nar, files)) = files.next().await {
         let origin = path.origin();
@@ -139,9 +138,9 @@ async fn update_index(args: &Args) -> Result<()> {
             }
         }
     }
-    errstln!("");
+    eprintln!("");
 
-    errst!("+ dumping index");
+    eprint!("+ dumping index");
 
     connection
         .backup(DatabaseName::Main, &args.output, None)
@@ -187,14 +186,14 @@ async fn main() {
     let args = Args::parse();
 
     if let Err(e) = update_index(&args).await {
-        errln!("error: {}", e);
+        eprintln!("error: {}", e);
 
         for e in e.iter().skip(1) {
-            errln!("caused by: {}", e);
+            eprintln!("caused by: {}", e);
         }
 
         if let Some(backtrace) = e.backtrace() {
-            errln!("backtrace: {:?}", backtrace);
+            eprintln!("backtrace: {:?}", backtrace);
         }
         process::exit(2);
     }
