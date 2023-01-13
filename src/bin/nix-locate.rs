@@ -8,7 +8,7 @@ use std::str;
 use std::str::FromStr;
 
 use ansi_term::Colour::Red;
-use clap::Parser;
+use clap::{Parser, value_parser};
 use error_chain::error_chain;
 use nix_index::database;
 use nix_index::files::{self, FileTreeEntry, FileType};
@@ -260,7 +260,7 @@ struct Opts {
 
     /// Only print matches for files that have this type. If the option is given multiple times,
     /// a file will be printed if it has any of the given types.
-    #[clap(short, long, value_parser=["d", "x", "r", "s"])]
+    #[clap(short, long, value_parser=value_parser!(FileType))]
     r#type: Option<Vec<FileType>>,
 
     /// Disables grouping of paths with the same matching part. By default, a path will only be

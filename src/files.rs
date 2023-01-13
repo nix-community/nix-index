@@ -6,6 +6,8 @@ use std::collections::HashMap;
 use std::io::{self, Write};
 use std::str::{self, FromStr};
 
+use clap::ValueEnum;
+use clap::builder::PossibleValue;
 use memchr::memchr;
 use serde::{Deserialize, Serialize};
 use serde_bytes::ByteBuf;
@@ -64,6 +66,26 @@ pub enum FileType {
     Regular { executable: bool },
     Directory,
     Symlink,
+}
+
+impl ValueEnum for FileType {
+    fn value_variants<'a>() -> &'a [Self] {
+        &[
+            FileType::Regular { executable: false },
+            FileType::Regular { executable: true },
+            FileType::Directory,
+            FileType::Symlink,
+        ]
+    }
+
+    fn to_possible_value(&self) -> Option<PossibleValue> {
+        match self {
+            FileType::Regular { executable: false } => Some(PossibleValue::new("r")),
+            FileType::Regular { executable: true } => Some(PossibleValue::new("x")),
+            FileType::Directory => Some(PossibleValue::new("d")),
+            FileType::Symlink => Some(PossibleValue::new("s")),
+        }
+    }
 }
 
 impl FromStr for FileType {
