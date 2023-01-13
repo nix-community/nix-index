@@ -1,8 +1,9 @@
-## 0.1.4 - [Unreleased]
+## 0.1.4 - 2023-01-13
 ### Added
 ### Fixed
 * fix RUSTSEC-2021-0131 (integer overflow in brotli) by migrating away from `brotli2` crate
 * fix RUSTSEC-2022-0006 (data race in `thread_local`) by updating `thread_local`
+* fix panic when using `--type` CLI (issue #202)
 ### Changed
 * updata all dependencies in Cargo.lock
 ### Removed
