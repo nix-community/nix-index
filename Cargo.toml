@@ -2,7 +2,7 @@
 authors = ["Benno Fünfstück <benno.fuenfstueck@gmail.com>"]
 edition = "2021"
 name = "nix-index"
-version = "0.1.4"
+version = "0.1.5"
 [[bin]]
 doc = false
 name = "nix-index"

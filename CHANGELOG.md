@@ -1,3 +1,9 @@
+## 0.1. - [Unreleased]
+### Added
+### Fixed
+### Changed
+### Removed
+
 ## 0.1.4 - 2023-01-13
 ### Added
 ### Fixed
@@ -5,8 +11,7 @@
 * fix RUSTSEC-2022-0006 (data race in `thread_local`) by updating `thread_local`
 * fix panic when using `--type` CLI (issue #202)
 ### Changed
-* updata all dependencies in Cargo.lock
-### Removed
+* update all dependencies in Cargo.lock
 
 ### 0.1.3 - 2023-01-10
 ### Added
