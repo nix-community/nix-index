@@ -17,7 +17,7 @@
     packages = forAllSystems (system: {
       default = with nixpkgsFor.${system}; rustPlatform.buildRustPackage  {
         pname = "nix-index";
-        version = "0.1.3";
+        version = "0.1.4";
 
         src = self;
 
@@ -27,6 +27,13 @@
         cargoLock = {
           lockFile = ./Cargo.lock;
         };
+
+        preUnpack = ''
+          mkdir tmp
+          cp -pr -L --reflink=auto -- "$cargoDeps" "tmp/$(stripHash "$cargoDeps")"
+          chmod -R a+w "tmp/$(stripHash "$cargoDeps")"
+          export cargoDeps="$(pwd)/tmp/$(stripHash "$cargoDeps")"
+        '';
 
         postInstall = ''
           mkdir -p $out/etc/profile.d
