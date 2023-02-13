@@ -316,6 +316,13 @@ fn next_matching_line<M: Matcher<Error = NoError>>(
         .find_candidate_line(&buf[start..])
         .unwrap_or_else(consume_no_error)
     {
+        // the buffer may end with a newline character, so we may get a match
+        // for an empty "line" at the end of the buffer
+        // since this is not a line match, return None
+        if start == buf.len() {
+            return None
+        };
+
         let (pos, confirmed) = match candidate {
             LineMatchKind::Confirmed(pos) => (start + pos, true),
             LineMatchKind::Candidate(pos) => (start + pos, false),
