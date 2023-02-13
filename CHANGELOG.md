@@ -4,6 +4,13 @@
 ### Changed
 ### Removed
 
+## 0.1.5
+### Added
+### Fixed
+* fix crash when using wildcard pattern with nix-locate (issue #205)
+### Changed
+### Removed
+
 ## 0.1.4 - 2023-01-13
 ### Added
 ### Fixed
