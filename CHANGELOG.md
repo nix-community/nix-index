@@ -1,4 +1,4 @@
-## 0.1. - [Unreleased]
+## 0.1.6 - [Unreleased]
 ### Added
 ### Fixed
 ### Changed
