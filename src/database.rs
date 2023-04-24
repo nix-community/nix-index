@@ -9,7 +9,7 @@ use std::path::Path;
 use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
 use error_chain::error_chain;
 use grep::matcher::{LineMatchKind, Match, Matcher, NoError};
-use grep::{self};
+use grep;
 use memchr::{memchr, memrchr};
 use regex::bytes::Regex;
 use regex_syntax::ast::{
