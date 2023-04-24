@@ -118,8 +118,8 @@ impl<T> FileNode<T> {
         match *self {
             Regular { size, executable } => (
                 Regular {
-                    size: size,
-                    executable: executable,
+                    size,
+                    executable,
                 },
                 None,
             ),
@@ -131,7 +131,7 @@ impl<T> FileNode<T> {
             ),
             Directory { size, ref contents } => (
                 Directory {
-                    size: size,
+                    size,
                     contents: (),
                 },
                 Some(contents),
@@ -143,7 +143,7 @@ impl<T> FileNode<T> {
     pub fn get_type(&self) -> FileType {
         match *self {
             FileNode::Regular { executable, .. } => FileType::Regular {
-                executable: executable,
+                executable,
             },
             FileNode::Directory { .. } => FileType::Directory,
             FileNode::Symlink { .. } => FileType::Symlink,
@@ -179,8 +179,8 @@ impl FileNode<()> {
                     .ok()
                     .and_then(|s| s.parse().ok())
                     .map(|size| Regular {
-                        executable: executable,
-                        size: size,
+                        executable,
+                        size,
                     })
             }
             b's' => Some(Symlink {
@@ -190,7 +190,7 @@ impl FileNode<()> {
                 .ok()
                 .and_then(|s| s.parse().ok())
                 .map(|size| Directory {
-                    size: size,
+                    size,
                     contents: (),
                 }),
             _ => None,
@@ -227,7 +227,7 @@ impl FileTreeEntry {
             let node = &buf[0..sep];
             FileNode::decode(node).map(|node| FileTreeEntry {
                 path: path.to_vec(),
-                node: node,
+                node,
             })
         })
     }
@@ -236,13 +236,13 @@ impl FileTreeEntry {
 impl FileTree {
     pub fn regular(size: u64, executable: bool) -> Self {
         FileTree(FileNode::Regular {
-            size: size,
-            executable: executable,
+            size,
+            executable,
         })
     }
 
     pub fn symlink(target: ByteBuf) -> Self {
-        FileTree(FileNode::Symlink { target: target })
+        FileTree(FileNode::Symlink { target })
     }
 
     pub fn directory(entries: HashMap<ByteBuf, FileTree>) -> Self {

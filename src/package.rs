@@ -98,9 +98,9 @@ impl PathOrigin {
                             }
                         }
                         Some(PathOrigin {
-                            attr: attr,
-                            output: output,
-                            toplevel: toplevel,
+                            attr,
+                            output,
+                            toplevel,
                             system: None,
                         })
                     })
@@ -158,7 +158,7 @@ impl StorePath {
                         store_dir: store_dir.to_string(),
                         hash: hash.to_string(),
                         name: name.to_string(),
-                        origin: origin,
+                        origin,
                     }
                 })
             })
