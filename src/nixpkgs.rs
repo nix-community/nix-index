@@ -255,7 +255,7 @@ impl<R: Read> PackagesParser<R> {
     fn err(&self, kind: ParserErrorKind) -> ParserError {
         ParserError {
             position: self.events.position(),
-            kind: kind,
+            kind,
         }
     }
 

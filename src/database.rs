@@ -172,7 +172,7 @@ impl Reader {
     pub fn query(self, exact_regex: &Regex) -> Query {
         Query {
             reader: self,
-            exact_regex: exact_regex,
+            exact_regex,
             hash: None,
             package_pattern: None,
         }
@@ -213,13 +213,13 @@ pub struct Query<'a, 'b> {
 impl<'a, 'b> Query<'a, 'b> {
     /// Limit results to entries from the package with the specified hash if `Some`.
     pub fn hash(self, hash: Option<String>) -> Query<'a, 'b> {
-        Query { hash: hash, ..self }
+        Query { hash, ..self }
     }
 
     /// Limit results to entries from packages whose name matches the given regex if `Some`.
     pub fn package_pattern(self, package_pattern: Option<&'b Regex>) -> Query<'a, 'b> {
         Query {
-            package_pattern: package_pattern,
+            package_pattern,
             ..self
         }
     }

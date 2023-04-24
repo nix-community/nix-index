@@ -167,7 +167,7 @@ impl<R: BufRead> Decoder<R> {
     pub fn new(reader: R) -> Decoder<R> {
         let capacity = 1_000_000;
         Decoder {
-            reader: reader,
+            reader,
             buf: ResizableBuf::new(capacity),
             pos: 0,
             last_path: 0,
@@ -362,7 +362,7 @@ impl<R: BufRead> Decoder<R> {
                     .checked_add(diff)
                     .ok_or_else(|| ErrorKind::SharedOverflow {
                         shared_len: self.shared_len,
-                        diff: diff,
+                        diff,
                     })?;
 
             // Copy the shared prefix
@@ -441,11 +441,11 @@ impl<W: Write> Encoder<W> {
             "footer path must not contain newlines"
         );
         Encoder {
-            writer: writer,
+            writer,
             last: Vec::new(),
             shared_len: 0,
-            footer_meta: footer_meta,
-            footer_path: footer_path,
+            footer_meta,
+            footer_path,
             footer_written: false,
         }
     }
