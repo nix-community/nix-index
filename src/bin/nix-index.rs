@@ -120,7 +120,7 @@ struct Args {
     jobs: usize,
 
     /// Directory where the index is stored
-    #[clap(short, long = "db", default_value_os = cache_dir())]
+    #[clap(short, long = "db", default_value_os = cache_dir(), env = "NIX_INDEX_DATABASE")]
     database: PathBuf,
 
     /// Path to nixpkgs for which to build the index, as accepted by nix-env -f

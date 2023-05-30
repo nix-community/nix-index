@@ -52,7 +52,7 @@ version = "1.24.1"
 
 [dependencies.clap]
 version = "4.0.32"
-features = ["derive"]
+features = ["derive", "env"]
 
 [dependencies.rusqlite]
 features = ["backup"]
