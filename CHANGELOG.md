@@ -1,5 +1,13 @@
-## 0.1.6 - [Unreleased]
+## 0.1.7 - [Unreleased]
 ### Added
+### Fixed
+### Changed
+### Removed
+
+## 0.1.6
+### Added
+* support setting `NIX_INDEX_DATABASE` environment variable to set database location (#213), thanks @mmarx
+* this version and future versions will be published to https://crates.io, simplifying library usage in other projects
 ### Fixed
 ### Changed
 ### Removed
