@@ -1,4 +1,4 @@
-# nix-index [![Build Status](https://travis-ci.org/bennofs/nix-index.svg?branch=master)](https://travis-ci.org/bennofs/nix-index)
+# nix-index
 ## A files database for nixpkgs
 **nix-index** is a tool to quickly locate the package providing a certain file in [`nixpkgs`](https://github.com/NixOS/nixpkgs). It indexes built derivations found in binary caches. 
 
