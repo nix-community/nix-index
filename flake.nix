@@ -17,7 +17,7 @@
     packages = forAllSystems (system: {
       default = with nixpkgsFor.${system}; rustPlatform.buildRustPackage  {
         pname = "nix-index";
-        version = "0.1.6";
+        version = "0.1.7";
 
         src = self;
 
