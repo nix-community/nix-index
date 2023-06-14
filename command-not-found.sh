@@ -78,7 +78,7 @@ by typing:
   nix profile install $toplevel#$attrs
 
 Or run it once with:
-  nix run $toplevel#$attrs --command ...
+  nix shell $toplevel#$attrs -c $cmd ...
 EOF
                 else
                     >&2 cat <<EOF
@@ -87,7 +87,7 @@ by typing:
   nix-env -iA $toplevel.$attrs
 
 Or run it once with:
-  nix-shell -p $attrs --run ...
+  nix-shell -p $attrs --run '$cmd ...'
 EOF
                 fi
             fi
@@ -115,9 +115,9 @@ EOF
 
             while read attr; do
                 if [ -e "$HOME/.nix-profile/manifest.json" ]; then
-                    >&2 echo "  nix run $toplevel#$attr --command ..."
+                    >&2 echo "  nix shell $toplevel#$attr -c $cmd ..."
                 else
-                    >&2 echo "  nix-shell -p $attr --run ..."
+                    >&2 echo "  nix-shell -p $attr --run '$cmd ...'"
                 fi
             done <<< "$attrs"
             ;;
