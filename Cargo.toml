@@ -26,52 +26,52 @@ name = "nix-index"
 name = "nix-locate"
 
 [dependencies]
-ansi_term = "0.12.1"
 bincode = "1.3.3"
 byteorder = "1.4.3"
 error-chain = "0.12.4"
-futures = "0.3.25"
-grep = "0.2.11"
+futures = "0.3.28"
+grep = "0.2.12"
 headers = "0.3.8"
-http = "0.2.8"
+http = "0.2.9"
 hyper-proxy = "0.9.1"
 atty = "0.2.14"
 memchr = "2.5.0"
 num_cpus = "1.15.0"
-indexmap = "1.9.2"
-rayon = "1.6.1"
-regex = "1.7.1"
-regex-syntax = "0.6.28"
+indexmap = "1.9.3"
+owo-colors = { version = "3.5.0", features = ["supports-colors"] }
+rayon = "1.7.0"
+regex = "1.8.4"
+regex-syntax = "0.7.2"
 separator = "0.4.1"
-serde = "1.0.152"
-serde_bytes = "0.11.8"
-serde_derive = "1.0.152"
-serde_json = "1.0.91"
+serde = "1.0.164"
+serde_bytes = "0.11.9"
+serde_derive = "1.0.164"
+serde_json = "1.0.96"
 tokio-retry = "0.3.0"
-tokio-stream = "0.1.11"
-url = "2.3.1"
+tokio-stream = "0.1.14"
+url = "2.4.0"
 void = "1.0.2"
-xdg = "2.4.1"
-xml-rs = "0.8.4"
+xdg = "2.5.0"
+xml-rs = "0.8.14"
 xz2 = "0.1.7"
-zstd = { version = "0.12.1", features = [ "zstdmt" ] }
-brotli-decompressor = "2.3.2"
+zstd = { version = "0.12.3", features = [ "zstdmt" ] }
+brotli-decompressor = "2.3.4"
 
 [dependencies.hyper]
 features = ["client", "http1", "http2", "runtime", "stream"]
-version = "0.14.23"
+version = "0.14.26"
 
 [dependencies.tokio]
 features = ["full"]
-version = "1.24.1"
+version = "1.28.2"
 
 [dependencies.clap]
-version = "4.0.32"
+version = "4.3.3"
 features = ["derive", "env"]
 
 [dependencies.rusqlite]
 features = ["backup"]
-version = "0.28.0"
+version = "0.29.0"
 
 [[example]]
 name = "nix-index-debug"
