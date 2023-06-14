@@ -7,11 +7,11 @@ use std::result;
 use std::str;
 use std::str::FromStr;
 
-use ansi_term::Colour::Red;
-use clap::{Parser, value_parser};
+use clap::{value_parser, Parser};
 use error_chain::error_chain;
 use nix_index::database;
 use nix_index::files::{self, FileTreeEntry, FileType};
+use owo_colors::{OwoColorize, Stream};
 use regex::bytes::Regex;
 use separator::Separatable;
 
@@ -134,7 +134,8 @@ fn locate(args: &Args) -> Result<()> {
                     print!(
                         "{}{}",
                         &path[prev..mat.start()],
-                        Red.paint(&path[mat.start()..mat.end()])
+                        (&path[mat.start()..mat.end()])
+                            .if_supports_color(Stream::Stdout, |txt| txt.red()),
                     );
                     prev = mat.end();
                 }
