@@ -261,6 +261,7 @@ struct Opts {
 
     /// Only print matches for files that have this type. If the option is given multiple times,
     /// a file will be printed if it has any of the given types.
+    /// [options: (r)egular file, e(x)cutable, (d)irectory, (s)ymlink]
     #[clap(short, long, value_parser=value_parser!(FileType))]
     r#type: Option<Vec<FileType>>,
 
