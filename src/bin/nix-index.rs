@@ -86,7 +86,7 @@ async fn update_index(args: &Args) -> Result<()> {
         db.add(path, files, args.filter_prefix.as_bytes())
             .chain_err(|| ErrorKind::WriteDatabase(args.database.clone()))?;
     }
-    eprintln!("");
+    eprintln!();
 
     if args.path_cache {
         eprintln!("+ writing path cache");

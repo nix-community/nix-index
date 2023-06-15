@@ -138,7 +138,7 @@ async fn update_index(args: &Args) -> Result<()> {
             }
         }
     }
-    eprintln!("");
+    eprintln!();
 
     eprint!("+ dumping index");
 

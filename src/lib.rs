@@ -7,7 +7,7 @@
         option_unwrap_used,
         stutter,
         wrong_pub_self_convention,
-        print_stdout
+        clippy::print_stdout
     )
 )]
 

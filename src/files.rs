@@ -103,7 +103,7 @@ impl FromStr for FileType {
 }
 
 /// This lists all file types that can currently be represented.
-pub const ALL_FILE_TYPES: &'static [FileType] = &[
+pub const ALL_FILE_TYPES: &[FileType] = &[
     FileType::Regular { executable: true },
     FileType::Regular { executable: false },
     FileType::Directory,
@@ -260,7 +260,7 @@ impl FileTree {
 
         while let Some(entry) = stack.pop() {
             let path = entry.0;
-            let &FileTree(ref current) = entry.1;
+            let FileTree(current) = entry.1;
             let (node, contents) = current.split_contents();
             if let Some(entries) = contents {
                 let mut entries = entries.iter().collect::<Vec<_>>();

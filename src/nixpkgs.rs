@@ -282,7 +282,7 @@ impl<R: Read> PackagesParser<R> {
                     ..
                 } => {
                     if element_name.local_name == "item" {
-                        if !self.current_item.is_none() {
+                        if self.current_item.is_some() {
                             return Err(self.err(ParentNotAllowed {
                                 element_name: "item".to_string(),
                                 found_parent: "item".to_string(),

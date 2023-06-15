@@ -88,7 +88,7 @@ impl PathOrigin {
             .and_then(|attr| {
                 iter.next()
                     .and_then(|v| String::from_utf8(v.to_vec()).ok())
-                    .and_then(|mut output| {
+                    .map(|mut output| {
                         let mut toplevel = true;
                         if let Some(l) = output.pop() {
                             if l == '\x02' {
@@ -97,12 +97,12 @@ impl PathOrigin {
                                 output.push(l)
                             }
                         }
-                        Some(PathOrigin {
+                        PathOrigin {
                             attr,
                             output,
                             toplevel,
                             system: None,
-                        })
+                        }
                     })
             })
     }
