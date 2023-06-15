@@ -56,15 +56,34 @@
       });
 
       devShells = forAllSystems (system: {
-        default = with nixpkgsFor.${system}; stdenv.mkDerivation {
+        minimal = with nixpkgsFor.${system}; mkShell {
           name = "nix-index";
 
-          RUST_SRC_PATH = rustPlatform.rustLibSrc;
+          nativeBuildInputs = [
+            pkg-config
+          ];
 
-          nativeBuildInputs = [ rustc cargo pkg-config clippy rustfmt ];
-          buildInputs = [ openssl curl sqlite ]
-            ++ lib.optional stdenv.isDarwin darwin.apple_sdk.frameworks.Security;
-          enableParallelBuilding = true;
+          buildInputs = [
+            openssl
+            sqlite
+          ] ++ lib.optionals stdenv.isDarwin [
+            darwin.apple_sdk.frameworks.Security
+          ];
+
+          env.LD_LIBRARY_PATH = lib.makeLibraryPath [ openssl ];
+        };
+
+        default = with nixpkgsFor.${system}; mkShell {
+          name = "nix-index";
+
+          inputsFrom = [ self.devShells.${system}.minimal ];
+
+          nativeBuildInputs = [ rustc cargo clippy rustfmt ];
+
+          env = {
+            LD_LIBRARY_PATH = lib.makeLibraryPath [ openssl ];
+            RUST_SRC_PATH = rustPlatform.rustLibSrc;
+          };
         };
       });
 
