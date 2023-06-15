@@ -1,13 +1,11 @@
 #![cfg_attr(
     feature = "cargo-clippy",
     warn(
-        filter_map,
-        option_map_unwrap_or,
-        option_map_unwrap_or_else,
-        option_unwrap_used,
-        stutter,
-        wrong_pub_self_convention,
-        print_stdout
+        clippy::manual_filter_map,
+        clippy::map_unwrap_or,
+        clippy::module_name_repetitions,
+        clippy::print_stdout,
+        clippy::unwrap_used,
     )
 )]
 

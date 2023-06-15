@@ -360,7 +360,7 @@ impl<R: BufRead> Decoder<R> {
             self.shared_len =
                 self.shared_len
                     .checked_add(diff)
-                    .ok_or_else(|| ErrorKind::SharedOverflow {
+                    .ok_or(ErrorKind::SharedOverflow {
                         shared_len: self.shared_len,
                         diff,
                     })?;

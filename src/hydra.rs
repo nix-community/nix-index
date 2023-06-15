@@ -84,7 +84,7 @@ error_chain! {
 
 impl From<Elapsed> for Error {
     fn from(_err: Elapsed) -> Self {
-        return Error::from(ErrorKind::Timeout);
+        Error::from(ErrorKind::Timeout)
     }
 }
 
@@ -105,8 +105,8 @@ impl Client {
             Ok(proxy_url) => {
                 let mut url =
                     Url::parse(&proxy_url).map_err(|_| ErrorKind::ParseProxy(proxy_url.clone()))?;
-                let username = String::from(url.username()).clone();
-                let password = url.password().map(|pw| String::from(pw));
+                let username = String::from(url.username());
+                let password = url.password().map(String::from);
 
                 url.set_username("")
                     .map_err(|_| ErrorKind::ParseProxy(proxy_url.clone()))?;
@@ -119,14 +119,14 @@ impl Client {
                 let intercept = match var("NO_PROXY") {
                     Ok(urls) => Intercept::Custom(Custom::from(
                         move |_scheme: Option<&str>, host: Option<&str>, _port: Option<u16>| {
-                            let url_list = urls.split(",");
+                            let url_list = urls.split(',');
                             !url_list.into_iter().any(|pat_str| {
                                 let pat_str = pat_str.trim();
 
                                 if pat_str == "*" {
                                     true
                                 } else {
-                                    let pat_uri = hyper::Uri::from_str(&pat_str);
+                                    let pat_uri = hyper::Uri::from_str(pat_str);
 
                                     match host {
                                         Some(host) => {
@@ -154,7 +154,7 @@ impl Client {
 
                 let mut proxy = Proxy::new(intercept, uri);
 
-                if username != "" {
+                if !username.is_empty() {
                     proxy.set_authorization(Authorization::basic(
                         &username,
                         &password.unwrap_or_default(),
@@ -177,7 +177,7 @@ impl Client {
         let mut req = req;
         match self {
             Client::Proxy(client, connector) => {
-                if let Some(headers) = connector.http_headers(&req.uri()) {
+                if let Some(headers) = connector.http_headers(req.uri()) {
                     req.headers_mut().extend(headers.clone().into_iter());
                 }
                 client.request(req)
@@ -220,8 +220,8 @@ impl Fetcher {
     pub fn new(cache_url: String) -> Result<Fetcher> {
         let client = Client::new()?;
         Ok(Fetcher {
-            client: client,
-            cache_url: cache_url,
+            client,
+            cache_url,
         })
     }
 
@@ -245,7 +245,7 @@ impl Fetcher {
             .max_delay(Duration::from_millis(5000))
             .take(20)
             // add some jitter
-            .map(|x| tokio_retry::strategy::jitter(x))
+            .map(tokio_retry::strategy::jitter)
             // wait at least 5 seconds, as that is the time that cache.nixos.org caches 500 internal server errors
             .map(|x| x + Duration::from_secs(5));
         Box::pin(Retry::spawn(strategy, move || {
@@ -336,7 +336,7 @@ impl Fetcher {
             }
         };
 
-        return Ok((url, Some(decoded)));
+        Ok((url, Some(decoded)))
     }
 
     /// Fetches the references of a given store path.
@@ -365,7 +365,6 @@ impl Fetcher {
                     let line = str::from_utf8(line)
                         .map_err(|e| ErrorKind::Unicode(url.clone(), line.to_vec(), e))?;
                     result = line
-                        .trim()
                         .split_whitespace()
                         .map(|new_path| {
                             let new_origin = PathOrigin {
@@ -400,7 +399,7 @@ impl Fetcher {
             Ok(Some(ParsedNAR {
                 store_path: path,
                 nar_path: nar_path.ok_or(ErrorKind::ParseStorePath(
-                    url.clone(),
+                    url,
                     "no URL line found".into(),
                 ))?,
                 references: result,
@@ -451,7 +450,7 @@ impl Fetcher {
 
             if duration > Duration::from_millis(2000) {
                 let secs = duration.as_secs();
-                let millis = duration.subsec_nanos() / 1000000;
+                let millis = duration.subsec_millis();
 
                 writeln!(
                     &mut io::stderr(),
@@ -566,7 +565,7 @@ impl<'de> Deserialize<'de> for HydraFileListing {
                 self,
                 mut access: V,
             ) -> result::Result<FileTree, V::Error> {
-                const VARIANTS: &'static [&'static str] = &["regular", "directory", "symlink"];
+                const VARIANTS: &[&str] = &["regular", "directory", "symlink"];
 
                 // These will get filled in as we visit the map.
                 // Note that not all of them will be available, depending on the `type` of the file listing
@@ -618,7 +617,7 @@ impl<'de> Deserialize<'de> for HydraFileListing {
                 }
 
                 // the type field must always be present so we know which type to expect
-                let typ: &[u8] = &*typ.ok_or_else(|| serde::de::Error::missing_field("type"))?;
+                let typ: &[u8] = &typ.ok_or_else(|| serde::de::Error::missing_field("type"))?;
 
                 match typ {
                     b"regular" => {

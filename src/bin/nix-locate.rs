@@ -76,7 +76,7 @@ fn locate(args: &Args) -> Result<()> {
 
                 let conditions = [
                     !args.group || !path[m.end()..].contains(&b'/'),
-                    !args.only_toplevel || (*store_path.origin()).toplevel,
+                    !args.only_toplevel || store_path.origin().toplevel,
                     args.file_type.iter().any(|t| &node.get_type() == t),
                 ];
 
