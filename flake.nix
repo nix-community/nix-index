@@ -44,7 +44,7 @@
 
           meta = with lib; {
             description = "A files database for nixpkgs";
-            homepage = "https://github.com/bennofs/nix-index";
+            homepage = "https://github.com/nix-community/nix-index";
             license = with licenses; [ bsd3 ];
             maintainers = [ maintainers.bennofs ];
           };
