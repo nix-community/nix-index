@@ -328,10 +328,9 @@ fn next_matching_line<M: Matcher<Error = NoError>>(
             LineMatchKind::Candidate(pos) => (start + pos, false),
         };
 
-        let line_start = memrchr(b'\n', &buf[..pos]).map(|x| x + 1).unwrap_or(0);
+        let line_start = memrchr(b'\n', &buf[..pos]).map_or(0, |x| x + 1);
         let line_end = memchr(b'\n', &buf[pos..])
-            .map(|x| x + pos + 1)
-            .unwrap_or(buf.len());
+            .map_or(buf.len(), |x| x + pos + 1);
 
         if !confirmed
             && !matcher
