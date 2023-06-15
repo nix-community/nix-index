@@ -108,10 +108,10 @@ impl PackagesQuery<ChildStdout> {
             if !result.status.success() {
                 let message = String::from_utf8_lossy(&result.stderr);
 
-                return Err(Error::Command(match result.status.code() {
-                    Some(c) => format!("nix-env failed with exit code {}:\n{}", c, message),
-                    None => format!("nix-env failed with unknown exit code:\n{}", message),
-                }));
+                return Err(Error::Command(format!(
+                    "nix-env failed with {}:\n{}",
+                    result.status, message,
+                )));
             }
 
             Ok(())
