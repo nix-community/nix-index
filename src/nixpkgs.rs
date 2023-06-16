@@ -123,6 +123,7 @@ impl PackagesQuery<ChildStdout> {
 
 impl Iterator for PackagesQuery<ChildStdout> {
     type Item = Result<StorePath, Error>;
+
     fn next(&mut self) -> Option<Self::Item> {
         if let Err(e) = self.ensure_initialized() {
             return Some(Err(e));

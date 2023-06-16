@@ -6,8 +6,8 @@ use std::collections::HashMap;
 use std::io::{self, Write};
 use std::str::{self, FromStr};
 
-use clap::ValueEnum;
 use clap::builder::PossibleValue;
+use clap::ValueEnum;
 use memchr::memchr;
 use serde::{Deserialize, Serialize};
 use serde_bytes::ByteBuf;
@@ -116,35 +116,21 @@ impl<T> FileNode<T> {
     pub fn split_contents(&self) -> (FileNode<()>, Option<&T>) {
         use self::FileNode::*;
         match *self {
-            Regular { size, executable } => (
-                Regular {
-                    size,
-                    executable,
-                },
-                None,
-            ),
+            Regular { size, executable } => (Regular { size, executable }, None),
             Symlink { ref target } => (
                 Symlink {
                     target: target.clone(),
                 },
                 None,
             ),
-            Directory { size, ref contents } => (
-                Directory {
-                    size,
-                    contents: (),
-                },
-                Some(contents),
-            ),
+            Directory { size, ref contents } => (Directory { size, contents: () }, Some(contents)),
         }
     }
 
     /// Return the type of this file.
     pub fn get_type(&self) -> FileType {
         match *self {
-            FileNode::Regular { executable, .. } => FileType::Regular {
-                executable,
-            },
+            FileNode::Regular { executable, .. } => FileType::Regular { executable },
             FileNode::Directory { .. } => FileType::Directory,
             FileNode::Symlink { .. } => FileType::Symlink,
         }
@@ -178,10 +164,7 @@ impl FileNode<()> {
                 str::from_utf8(buf)
                     .ok()
                     .and_then(|s| s.parse().ok())
-                    .map(|size| Regular {
-                        executable,
-                        size,
-                    })
+                    .map(|size| Regular { executable, size })
             }
             b's' => Some(Symlink {
                 target: ByteBuf::from(buf),
@@ -189,10 +172,7 @@ impl FileNode<()> {
             b'd' => str::from_utf8(buf)
                 .ok()
                 .and_then(|s| s.parse().ok())
-                .map(|size| Directory {
-                    size,
-                    contents: (),
-                }),
+                .map(|size| Directory { size, contents: () }),
             _ => None,
         })
     }
@@ -235,10 +215,7 @@ impl FileTreeEntry {
 
 impl FileTree {
     pub fn regular(size: u64, executable: bool) -> Self {
-        FileTree(FileNode::Regular {
-            size,
-            executable,
-        })
+        FileTree(FileNode::Regular { size, executable })
     }
 
     pub fn symlink(target: ByteBuf) -> Self {

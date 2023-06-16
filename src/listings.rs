@@ -4,8 +4,8 @@ use std::iter::FromIterator;
 use std::pin::Pin;
 
 use futures::{future, FutureExt, Stream, StreamExt, TryFutureExt};
-use indexmap::IndexMap;
 use indexmap::map::Entry;
+use indexmap::IndexMap;
 use rayon::prelude::{IntoParallelRefIterator, ParallelIterator};
 
 use crate::errors::{Error, ErrorKind, Result, ResultExt};
@@ -65,10 +65,10 @@ fn fetch_listings_impl(
                 if e.get().origin().attr.len() > path.origin().attr.len() {
                     e.insert(path);
                 }
-            },
+            }
             Entry::Vacant(e) => {
                 e.insert(path);
-            },
+            }
         };
     }
 

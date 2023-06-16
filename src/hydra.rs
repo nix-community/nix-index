@@ -12,6 +12,7 @@ use std::pin::Pin;
 use std::result;
 use std::str::{self, FromStr, Utf8Error};
 use std::time::{Duration, Instant};
+
 use brotli_decompressor::BrotliDecompress;
 use error_chain::error_chain;
 use futures::future::{self, Either};
@@ -219,10 +220,7 @@ impl Fetcher {
     /// `cache_url` specifies the URL of the binary cache (example: `https://cache.nixos.org`).
     pub fn new(cache_url: String) -> Result<Fetcher> {
         let client = Client::new()?;
-        Ok(Fetcher {
-            client,
-            cache_url,
-        })
+        Ok(Fetcher { client, cache_url })
     }
 
     /// Sends a GET request to the given URL and decodes the response with the given encoding.
@@ -398,10 +396,8 @@ impl Fetcher {
 
             Ok(Some(ParsedNAR {
                 store_path: path,
-                nar_path: nar_path.ok_or(ErrorKind::ParseStorePath(
-                    url,
-                    "no URL line found".into(),
-                ))?,
+                nar_path: nar_path
+                    .ok_or(ErrorKind::ParseStorePath(url, "no URL line found".into()))?,
                 references: result,
             }))
         };
