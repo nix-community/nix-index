@@ -22,3 +22,12 @@ jobs:
         run: cargo build --verbose
       - name: Run tests
         run: cargo test --verbose
+
+  format:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      - name: Cargo fmt
+        run: |
+          rustup toolchain install nightly --profile minimal -c rustfmt
+          cargo +nightly fmt --check

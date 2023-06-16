@@ -126,6 +126,7 @@ impl ResizableBuf {
 
 impl Deref for ResizableBuf {
     type Target = [u8];
+
     fn deref(&self) -> &[u8] {
         &self.data
     }

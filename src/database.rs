@@ -8,8 +8,8 @@ use std::path::Path;
 
 use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
 use error_chain::error_chain;
-use grep::matcher::{LineMatchKind, Match, Matcher, NoError};
 use grep;
+use grep::matcher::{LineMatchKind, Match, Matcher, NoError};
 use memchr::{memchr, memrchr};
 use regex::bytes::Regex;
 use regex_syntax::ast::{
@@ -320,7 +320,7 @@ fn next_matching_line<M: Matcher<Error = NoError>>(
         // for an empty "line" at the end of the buffer
         // since this is not a line match, return None
         if start == buf.len() {
-            return None
+            return None;
         };
 
         let (pos, confirmed) = match candidate {
@@ -329,8 +329,7 @@ fn next_matching_line<M: Matcher<Error = NoError>>(
         };
 
         let line_start = memrchr(b'\n', &buf[..pos]).map_or(0, |x| x + 1);
-        let line_end = memchr(b'\n', &buf[pos..])
-            .map_or(buf.len(), |x| x + pos + 1);
+        let line_end = memchr(b'\n', &buf[pos..]).map_or(buf.len(), |x| x + pos + 1);
 
         if !confirmed
             && !matcher
