@@ -1,7 +1,9 @@
 //! Tool for searching for files in nixpkgs packages
 use std::collections::HashSet;
+use std::env::args_os;
 use std::env::var_os;
 use std::ffi::OsStr;
+use std::ffi::OsString;
 use std::fs::File;
 use std::io::stdout;
 use std::io::BufRead;
@@ -199,21 +201,23 @@ fn has_flakes() -> bool {
     false
 }
 
-fn command_not_found(args: Vec<String>, database: PathBuf) -> Result<()> {
-    let mut args = args.into_iter();
+fn command_not_found(args: Vec<OsString>) -> Result<()> {
+    let mut args = args.into_iter().skip(2);
     let cmd = args.next().expect("there should be a command");
+    let cmd_str = cmd.to_string_lossy();
+    let database = var_os("NIX_INDEX_DATABASE").map_or_else(|| cache_dir().into(), PathBuf::from);
 
     // TODO: use "command not found" gettext translations
 
     // taken from http://www.linuxjournal.com/content/bash-command-not-found
     // - do not run when inside Midnight Commander or within a Pipe
     if has_env("MC_SID") || !stdout().is_terminal() {
-        eprintln!("{cmd}: command not found");
+        eprintln!("{cmd_str}: command not found");
         process::exit(127);
     }
 
     // Build the regular expression matcher
-    let pattern = format!("^/bin/{}$", regex::escape(&cmd));
+    let pattern = format!("^/bin/{}$", regex::escape(&cmd_str));
     let regex = Regex::new(&pattern).chain_err(|| ErrorKind::Grep(pattern.clone()))?;
 
     // Open the database
@@ -246,7 +250,7 @@ fn command_not_found(args: Vec<String>, database: PathBuf) -> Result<()> {
     let mut it = attrs.iter();
     if let Some(attr) = it.next() {
         if it.next().is_some() {
-            eprintln!("The program '{cmd}' is currently not installed. It is provided by");
+            eprintln!("The program '{cmd_str}' is currently not installed. It is provided by");
             eprintln!("several packages. You can install it by typing one of the following:");
 
             let has_flakes = has_flakes();
@@ -263,13 +267,13 @@ fn command_not_found(args: Vec<String>, database: PathBuf) -> Result<()> {
 
             for attr in attrs {
                 if has_flakes {
-                    eprintln!("  nix shell nixpkgs#{attr} -c {cmd} ...");
+                    eprintln!("  nix shell nixpkgs#{attr} -c {cmd_str} ...");
                 } else {
-                    eprintln!("  nix-shell -p {attr} --run '{cmd} ...'");
+                    eprintln!("  nix-shell -p {attr} --run '{cmd_str} ...'");
                 }
             }
         } else if has_env("NIX_AUTO_INSTALL") {
-            eprintln!("The program '{cmd}' is currently not installed. It is provided by");
+            eprintln!("The program '{cmd_str}' is currently not installed. It is provided by");
             eprintln!("the package 'nixpkgs.{attr}', which I will now install for you.");
 
             let res = if has_flakes() {
@@ -294,7 +298,7 @@ fn command_not_found(args: Vec<String>, database: PathBuf) -> Result<()> {
                 }
             } else {
                 eprintln!("Failed to install nixpkgs.{attr}");
-                eprintln!("{cmd}: command not found");
+                eprintln!("{cmd_str}: command not found");
             }
         } else if has_env("NIX_AUTO_RUN") {
             let res = Command::new("nix-build")
@@ -308,8 +312,8 @@ fn command_not_found(args: Vec<String>, database: PathBuf) -> Result<()> {
                 // TODO: escape or find and alternative
                 let mut cmd = cmd;
                 for arg in args {
-                    cmd.push(' ');
-                    cmd.push_str(&arg);
+                    cmd.push(" ");
+                    cmd.push(&arg);
                 }
 
                 let res = Command::new("nix-shell")
@@ -326,12 +330,12 @@ fn command_not_found(args: Vec<String>, database: PathBuf) -> Result<()> {
                 }
             } else {
                 eprintln!("Failed to install nixpkgs.{attr}");
-                eprintln!("{cmd}: command not found");
+                eprintln!("{cmd_str}: command not found");
             }
         } else {
             let has_flakes = has_flakes();
 
-            eprintln!("The program '{cmd}' is currently not installed. You can install it");
+            eprintln!("The program '{cmd_str}' is currently not installed. You can install it");
             eprintln!("by typing:");
 
             if has_flakes {
@@ -343,13 +347,13 @@ fn command_not_found(args: Vec<String>, database: PathBuf) -> Result<()> {
             eprintln!("\nOr run it once with:");
 
             if has_flakes {
-                eprintln!("  nix shell nixpkgs#{attr} -c {cmd} ...");
+                eprintln!("  nix shell nixpkgs#{attr} -c {cmd_str} ...");
             } else {
-                eprintln!("  nix-shell -p {attr} --run '{cmd} ...'");
+                eprintln!("  nix-shell -p {attr} --run '{cmd_str} ...'");
             }
         }
     } else {
-        eprintln!("{cmd}: command not found");
+        eprintln!("{cmd_str}: command not found");
     }
 
     Ok(())
@@ -442,11 +446,7 @@ fn cache_dir() -> &'static OsStr {
 #[clap(author, about, version, after_help = LONG_USAGE)]
 struct Opts {
     /// Pattern for which to search
-    #[arg(
-        required_unless_present = "command_not_found",
-        default_value_t, // placeholder, will not be accessed
-        hide_default_value = true
-    )]
+    // #[clap(name = "PATTERN")]
     pattern: String,
 
     /// Directory where the index is stored
@@ -503,9 +503,6 @@ struct Opts {
     /// store path are omitted. This is useful for scripts that use the output of nix-locate.
     #[clap(long)]
     minimal: bool,
-
-    #[clap(long, num_args = 1..)]
-    command_not_found: Option<Vec<String>>,
 }
 
 #[derive(clap::ValueEnum, Clone, Copy, Debug)]
@@ -529,10 +526,9 @@ impl FromStr for Color {
 }
 
 fn main() {
-    let args = Opts::parse();
-
-    if let Some(cmd) = args.command_not_found {
-        if let Err(e) = command_not_found(cmd, args.database) {
+    let args: Vec<_> = args_os().collect();
+    if matches!(args.get(1), Some(arg) if arg == "--command-not-found") {
+        if let Err(e) = command_not_found(args) {
             eprintln!("error: {e}");
 
             for e in e.iter().skip(1) {
@@ -546,6 +542,7 @@ fn main() {
         process::exit(127);
     }
 
+    let args = Opts::parse_from(args);
     let args = process_args(args).unwrap_or_else(|e| e.exit());
 
     if let Err(e) = locate(&args) {
