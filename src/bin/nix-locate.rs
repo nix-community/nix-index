@@ -6,7 +6,7 @@ use std::fs::File;
 use std::io::stdout;
 use std::io::BufRead;
 use std::io::BufReader;
-use std::io::IsTerminal;
+// use std::io::IsTerminal;
 use std::path::PathBuf;
 use std::process;
 use std::process::Command;
@@ -16,6 +16,7 @@ use std::str::FromStr;
 
 use clap::{value_parser, Parser};
 use error_chain::error_chain;
+use is_terminal::IsTerminal;
 use nix_index::database;
 use nix_index::files::{self, FileTreeEntry, FileType};
 use owo_colors::{OwoColorize, Stream};
@@ -284,7 +285,7 @@ fn command_not_found(args: Vec<String>, database: PathBuf) -> Result<()> {
                     .status()
             };
 
-            if res.is_ok_and(|status| status.success()) {
+            if matches!(res, Ok(status) if status.success()) {
                 let res = Command::new(cmd).args(args).status();
                 if let Ok(status) = res {
                     if let Some(code) = status.code() {
@@ -303,7 +304,7 @@ fn command_not_found(args: Vec<String>, database: PathBuf) -> Result<()> {
                 .arg("<nixpkgs>")
                 .status();
 
-            if res.is_ok_and(|status| status.success()) {
+            if matches!(res, Ok(status) if status.success()) {
                 // TODO: escape or find and alternative
                 let mut cmd = cmd;
                 for arg in args {

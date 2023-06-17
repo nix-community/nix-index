@@ -1110,6 +1110,7 @@ dependencies = [
  "hyper",
  "hyper-proxy",
  "indexmap",
+ "is-terminal",
  "memchr",
  "num_cpus",
  "owo-colors",
