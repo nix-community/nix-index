@@ -347,7 +347,6 @@ fn next_matching_line<M: Matcher<Error = NoError>>(
 
 impl<'a, 'b> ReaderIter<'a, 'b> {
     /// Reads input until `self.found` contains at least one entry or the end of the input has been reached.
-    #[allow(unused_assignments)] // because of https://github.com/rust-lang/rust/issues/22630
     fn fill_buf(&mut self) -> Result<()> {
         // the input is processed in blocks until we've found at least a single entry
         while self.found.is_empty() {
