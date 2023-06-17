@@ -1,8 +1,15 @@
 //! Tool for searching for files in nixpkgs packages
 use std::collections::HashSet;
+use std::env::var_os;
 use std::ffi::OsStr;
+use std::fs::File;
+use std::io::stdout;
+use std::io::BufRead;
+use std::io::BufReader;
+use std::io::IsTerminal;
 use std::path::PathBuf;
 use std::process;
+use std::process::Command;
 use std::result;
 use std::str;
 use std::str::FromStr;
@@ -149,6 +156,204 @@ fn locate(args: &Args) -> Result<()> {
     Ok(())
 }
 
+fn has_env(env: &str) -> bool {
+    var_os(env).map_or(false, |var| !var.is_empty())
+}
+
+fn has_flakes() -> bool {
+    // TODO: user config
+    let mut files = vec![PathBuf::from("/etc/nix/nix.conf")];
+
+    while let Some(file) = files.pop() {
+        let Ok(file) = File::open(file) else {
+            continue;
+        };
+
+        for line in BufReader::new(file).lines() {
+            let Ok(line) = line else {
+                break;
+            };
+
+            let mut tokens = line.split_whitespace();
+            let Some(name) = tokens.next() else {
+                continue;
+            };
+
+            match name {
+                "experimental-features" => {
+                    if tokens.any(|feat| feat == "flakes") {
+                        return true;
+                    }
+                }
+                "include" | "!include" => {
+                    if let Some(file) = tokens.next() {
+                        files.push(file.into());
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
+
+    false
+}
+
+fn command_not_found(args: Vec<String>, database: PathBuf) -> Result<()> {
+    let mut args = args.into_iter();
+    let cmd = args.next().expect("there should be a command");
+
+    // TODO: use "command not found" gettext translations
+
+    // taken from http://www.linuxjournal.com/content/bash-command-not-found
+    // - do not run when inside Midnight Commander or within a Pipe
+    if has_env("MC_SID") || !stdout().is_terminal() {
+        eprintln!("{cmd}: command not found");
+        process::exit(127);
+    }
+
+    // Build the regular expression matcher
+    let pattern = format!("^/bin/{}$", cmd);
+    let regex = Regex::new(&pattern).chain_err(|| ErrorKind::Grep(pattern.clone()))?;
+
+    // Open the database
+    let index_file = database.join("files");
+    let db = database::Reader::open(&index_file)
+        .chain_err(|| ErrorKind::ReadDatabase(index_file.clone()))?;
+
+    let results = db
+        .query(&regex)
+        .run()
+        .chain_err(|| ErrorKind::Grep(pattern.clone()))?
+        .filter(|v| {
+            v.as_ref().ok().map_or(true, |(store_path, entry)| {
+                store_path.origin().toplevel
+                    && entry.node.get_type() == FileType::Regular { executable: true }
+            })
+        });
+
+    let mut attrs = HashSet::new();
+    for v in results {
+        let (store_path, _) = v.chain_err(|| ErrorKind::ReadDatabase(index_file.clone()))?;
+
+        attrs.insert(format!(
+            "{}.{}",
+            store_path.origin().attr,
+            store_path.origin().output,
+        ));
+    }
+
+    let mut it = attrs.iter();
+    if let Some(attr) = it.next() {
+        if it.next().is_some() {
+            eprintln!("The program '{cmd}' is currently not installed. It is provided by");
+            eprintln!("several packages. You can install it by typing one of the following:");
+
+            let has_flakes = has_flakes();
+
+            for attr in &attrs {
+                if has_flakes {
+                    eprintln!("  nix profile install nixpkgs#{attr}");
+                } else {
+                    eprintln!("  nix-env -iA nixpkgs.{attr}");
+                }
+            }
+
+            eprintln!("\nOr run it once with:");
+
+            for attr in attrs {
+                if has_flakes {
+                    eprintln!("  nix shell nixpkgs#{attr} -c {cmd} ...");
+                } else {
+                    eprintln!("  nix-shell -p {attr} --run '{cmd} ...'");
+                }
+            }
+        } else if has_env("NIX_AUTO_INSTALL") {
+            eprintln!("The program '{cmd}' is currently not installed. It is provided by");
+            eprintln!("the package 'nixpkgs.{attr}', which I will now install for you.");
+
+            let res = if has_flakes() {
+                Command::new("nix")
+                    .arg("profile")
+                    .arg("install")
+                    .arg(format!("nixpkgs#{attr}"))
+                    .status()
+            } else {
+                Command::new("nix-env")
+                    .arg("-iA")
+                    .arg(format!("nixpkgs.{attr}"))
+                    .status()
+            };
+
+            if res.is_ok_and(|status| status.success()) {
+                let res = Command::new(cmd).args(args).status();
+                if let Ok(status) = res {
+                    if let Some(code) = status.code() {
+                        process::exit(code);
+                    }
+                }
+            } else {
+                eprintln!("Failed to install nixpkgs.{attr}");
+                eprintln!("{cmd}: command not found");
+            }
+        } else if has_env("NIX_AUTO_RUN") {
+            let res = Command::new("nix-build")
+                .arg("--no-out-link")
+                .arg("-A")
+                .arg(attr)
+                .arg("<nixpkgs>")
+                .status();
+
+            if res.is_ok_and(|status| status.success()) {
+                // TODO: escape or find and alternative
+                let mut cmd = cmd;
+                for arg in args {
+                    cmd.push(' ');
+                    cmd.push_str(&arg);
+                }
+
+                let res = Command::new("nix-shell")
+                    .arg("-p")
+                    .arg(attr)
+                    .arg("--run")
+                    .arg(cmd)
+                    .status();
+
+                if let Ok(status) = res {
+                    if let Some(code) = status.code() {
+                        process::exit(code);
+                    }
+                }
+            } else {
+                eprintln!("Failed to install nixpkgs.{attr}");
+                eprintln!("{cmd}: command not found");
+            }
+        } else {
+            let has_flakes = has_flakes();
+
+            eprintln!("The program '{cmd}' is currently not installed. You can install it");
+            eprintln!("by typing:");
+
+            if has_flakes {
+                eprintln!("  nix profile install nixpkgs#{attr}");
+            } else {
+                eprintln!("  nix-env -iA nixpkgs.{attr}");
+            }
+
+            eprintln!("\nOr run it once with:");
+
+            if has_flakes {
+                eprintln!("  nix shell nixpkgs#{attr} -c {cmd} ...");
+            } else {
+                eprintln!("  nix-shell -p {attr} --run '{cmd} ...'");
+            }
+        }
+    } else {
+        eprintln!("{cmd}: command not found");
+    }
+
+    Ok(())
+}
+
 /// Extract the parsed arguments for clap's arg matches.
 ///
 /// Handles parsing the values of more complex arguments.
@@ -236,7 +441,11 @@ fn cache_dir() -> &'static OsStr {
 #[clap(author, about, version, after_help = LONG_USAGE)]
 struct Opts {
     /// Pattern for which to search
-    // #[clap(name = "PATTERN")]
+    #[arg(
+        required_unless_present = "command_not_found",
+        default_value_t, // placeholder, will not be accessed
+        hide_default_value = true
+    )]
     pattern: String,
 
     /// Directory where the index is stored
@@ -293,6 +502,9 @@ struct Opts {
     /// store path are omitted. This is useful for scripts that use the output of nix-locate.
     #[clap(long)]
     minimal: bool,
+
+    #[clap(long, num_args = 1..)]
+    command_not_found: Option<Vec<String>>,
 }
 
 #[derive(clap::ValueEnum, Clone, Copy, Debug)]
@@ -317,6 +529,21 @@ impl FromStr for Color {
 
 fn main() {
     let args = Opts::parse();
+
+    if let Some(cmd) = args.command_not_found {
+        if let Err(e) = command_not_found(cmd, args.database) {
+            eprintln!("error: {e}");
+
+            for e in e.iter().skip(1) {
+                eprintln!("caused by: {e}");
+            }
+
+            if let Some(backtrace) = e.backtrace() {
+                eprintln!("backtrace: {backtrace:?}");
+            }
+        }
+        process::exit(127);
+    }
 
     let args = process_args(args).unwrap_or_else(|e| e.exit());
 
