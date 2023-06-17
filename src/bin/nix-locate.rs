@@ -212,7 +212,7 @@ fn command_not_found(args: Vec<String>, database: PathBuf) -> Result<()> {
     }
 
     // Build the regular expression matcher
-    let pattern = format!("^/bin/{}$", cmd);
+    let pattern = format!("^/bin/{}$", regex::escape(&cmd));
     let regex = Regex::new(&pattern).chain_err(|| ErrorKind::Grep(pattern.clone()))?;
 
     // Open the database
