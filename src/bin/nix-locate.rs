@@ -5,10 +5,12 @@ use std::env::var_os;
 use std::ffi::OsStr;
 use std::ffi::OsString;
 use std::fs::File;
+use std::io::stderr;
 use std::io::stdout;
 use std::io::BufRead;
 use std::io::BufReader;
 use std::io::IsTerminal;
+use std::io::Write;
 use std::path::PathBuf;
 use std::process;
 use std::process::Command;
@@ -18,6 +20,7 @@ use std::str::FromStr;
 
 use clap::{value_parser, Parser};
 use error_chain::error_chain;
+use indoc::writedoc;
 use nix_index::database;
 use nix_index::files::{self, FileTreeEntry, FileType};
 use owo_colors::{OwoColorize, Stream};
@@ -205,13 +208,14 @@ fn command_not_found(args: Vec<OsString>) -> Result<()> {
     let cmd = args.next().expect("there should be a command");
     let cmd_str = cmd.to_string_lossy();
     let database = var_os("NIX_INDEX_DATABASE").map_or_else(|| cache_dir().into(), PathBuf::from);
+    let mut err = stderr().lock();
 
     // TODO: use "command not found" gettext translations
 
     // taken from http://www.linuxjournal.com/content/bash-command-not-found
     // - do not run when inside Midnight Commander or within a Pipe
     if has_env("MC_SID") || !stdout().is_terminal() {
-        eprintln!("{cmd_str}: command not found");
+        let _ = writeln!(err, "{cmd_str}: command not found");
         process::exit(127);
     }
 
@@ -249,31 +253,37 @@ fn command_not_found(args: Vec<OsString>) -> Result<()> {
     let mut it = attrs.iter();
     if let Some(attr) = it.next() {
         if it.next().is_some() {
-            eprintln!("The program '{cmd_str}' is currently not installed. It is provided by");
-            eprintln!("several packages. You can install it by typing one of the following:");
+            writedoc! {err, "
+                The program '{cmd_str}' is currently not installed. It is provided by;
+                several packages. You can install it by typing one of the following:
+            "}
+            .unwrap();
 
             let has_flakes = has_flakes();
 
             for attr in &attrs {
                 if has_flakes {
-                    eprintln!("  nix profile install nixpkgs#{attr}");
+                    writeln!(err, "  nix profile install nixpkgs#{attr}").unwrap();
                 } else {
-                    eprintln!("  nix-env -iA nixpkgs.{attr}");
+                    writeln!(err, "  nix-env -iA nixpkgs.{attr}").unwrap();
                 }
             }
 
-            eprintln!("\nOr run it once with:");
+            writeln!(err, "\nOr run it once with:").unwrap();
 
             for attr in attrs {
                 if has_flakes {
-                    eprintln!("  nix shell nixpkgs#{attr} -c {cmd_str} ...");
+                    writeln!(err, "  nix shell nixpkgs#{attr} -c {cmd_str} ...").unwrap();
                 } else {
-                    eprintln!("  nix-shell -p {attr} --run '{cmd_str} ...'");
+                    writeln!(err, "  nix-shell -p {attr} --run '{cmd_str} ...'").unwrap();
                 }
             }
         } else if has_env("NIX_AUTO_INSTALL") {
-            eprintln!("The program '{cmd_str}' is currently not installed. It is provided by");
-            eprintln!("the package 'nixpkgs.{attr}', which I will now install for you.");
+            writedoc! {err, "
+                The program '{cmd_str}' is currently not installed. It is provided by
+                the package 'nixpkgs.{attr}', which I will now install for you.
+            "}
+            .unwrap();
 
             let res = if has_flakes() {
                 Command::new("nix")
@@ -296,8 +306,11 @@ fn command_not_found(args: Vec<OsString>) -> Result<()> {
                     }
                 }
             } else {
-                eprintln!("Failed to install nixpkgs.{attr}");
-                eprintln!("{cmd_str}: command not found");
+                writedoc! {err, "
+                    Failed to install nixpkgs.{attr}
+                    {cmd_str}: command not found
+                "}
+                .unwrap();
             }
         } else if has_env("NIX_AUTO_RUN") {
             let res = Command::new("nix-build")
@@ -328,31 +341,37 @@ fn command_not_found(args: Vec<OsString>) -> Result<()> {
                     }
                 }
             } else {
-                eprintln!("Failed to install nixpkgs.{attr}");
-                eprintln!("{cmd_str}: command not found");
+                writedoc! {err, "
+                    Failed to install nixpkgs.{attr}
+                    {cmd_str}: command not found
+                "}
+                .unwrap();
             }
         } else {
             let has_flakes = has_flakes();
 
-            eprintln!("The program '{cmd_str}' is currently not installed. You can install it");
-            eprintln!("by typing:");
+            writedoc! {err, "
+                The program '{cmd_str}' is currently not installed. You can install it
+                by typing:
+            "}
+            .unwrap();
 
             if has_flakes {
-                eprintln!("  nix profile install nixpkgs#{attr}");
+                writeln!(err, "  nix profile install nixpkgs#{attr}").unwrap();
             } else {
-                eprintln!("  nix-env -iA nixpkgs.{attr}");
+                writeln!(err, "  nix-env -iA nixpkgs.{attr}").unwrap();
             }
 
-            eprintln!("\nOr run it once with:");
+            writeln!(err, "\nOr run it once with:").unwrap();
 
             if has_flakes {
-                eprintln!("  nix shell nixpkgs#{attr} -c {cmd_str} ...");
+                writeln!(err, "  nix shell nixpkgs#{attr} -c {cmd_str} ...").unwrap();
             } else {
-                eprintln!("  nix-shell -p {attr} --run '{cmd_str} ...'");
+                writeln!(err, "  nix-shell -p {attr} --run '{cmd_str} ...'").unwrap();
             }
         }
     } else {
-        eprintln!("{cmd_str}: command not found");
+        writeln!(err, "{cmd_str}: command not found").unwrap();
     }
 
     Ok(())
