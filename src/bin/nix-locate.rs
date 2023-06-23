@@ -1,14 +1,26 @@
 //! Tool for searching for files in nixpkgs packages
 use std::collections::HashSet;
+use std::env::args_os;
+use std::env::var_os;
 use std::ffi::OsStr;
+use std::ffi::OsString;
+use std::fs::File;
+use std::io::stderr;
+use std::io::stdout;
+use std::io::BufRead;
+use std::io::BufReader;
+use std::io::IsTerminal;
+use std::io::Write;
 use std::path::PathBuf;
 use std::process;
+use std::process::Command;
 use std::result;
 use std::str;
 use std::str::FromStr;
 
 use clap::{value_parser, Parser};
 use error_chain::error_chain;
+use indoc::writedoc;
 use nix_index::database;
 use nix_index::files::{self, FileTreeEntry, FileType};
 use owo_colors::{OwoColorize, Stream};
@@ -144,6 +156,222 @@ fn locate(args: &Args) -> Result<()> {
                 println!("{}", path);
             }
         }
+    }
+
+    Ok(())
+}
+
+fn has_env(env: &str) -> bool {
+    var_os(env).map_or(false, |var| !var.is_empty())
+}
+
+fn has_flakes() -> bool {
+    // TODO: user config
+    let mut files = vec![PathBuf::from("/etc/nix/nix.conf")];
+
+    while let Some(file) = files.pop() {
+        let Ok(file) = File::open(file) else {
+            continue;
+        };
+
+        for line in BufReader::new(file).lines() {
+            let Ok(line) = line else {
+                break;
+            };
+
+            let mut tokens = line.split_whitespace();
+            let Some(name) = tokens.next() else {
+                continue;
+            };
+
+            match name {
+                "experimental-features" => {
+                    if tokens.any(|feat| feat == "flakes") {
+                        return true;
+                    }
+                }
+                "include" | "!include" => {
+                    if let Some(file) = tokens.next() {
+                        files.push(file.into());
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
+
+    false
+}
+
+fn command_not_found(args: Vec<OsString>) -> Result<()> {
+    let mut args = args.into_iter().skip(2);
+    let cmd = args.next().expect("there should be a command");
+    let cmd_str = cmd.to_string_lossy();
+    let database = var_os("NIX_INDEX_DATABASE").map_or_else(|| cache_dir().into(), PathBuf::from);
+    let mut err = stderr().lock();
+
+    // TODO: use "command not found" gettext translations
+
+    // taken from http://www.linuxjournal.com/content/bash-command-not-found
+    // - do not run when inside Midnight Commander or within a Pipe
+    if has_env("MC_SID") || !stdout().is_terminal() {
+        let _ = writeln!(err, "{cmd_str}: command not found");
+        process::exit(127);
+    }
+
+    // Build the regular expression matcher
+    let pattern = format!("^/bin/{}$", regex::escape(&cmd_str));
+    let regex = Regex::new(&pattern).chain_err(|| ErrorKind::Grep(pattern.clone()))?;
+
+    // Open the database
+    let index_file = database.join("files");
+    let db = database::Reader::open(&index_file)
+        .chain_err(|| ErrorKind::ReadDatabase(index_file.clone()))?;
+
+    let results = db
+        .query(&regex)
+        .run()
+        .chain_err(|| ErrorKind::Grep(pattern.clone()))?
+        .filter(|v| {
+            v.as_ref().ok().map_or(true, |(store_path, entry)| {
+                store_path.origin().toplevel
+                    && entry.node.get_type() == FileType::Regular { executable: true }
+            })
+        });
+
+    let mut attrs = HashSet::new();
+    for v in results {
+        let (store_path, _) = v.chain_err(|| ErrorKind::ReadDatabase(index_file.clone()))?;
+
+        attrs.insert(format!(
+            "{}.{}",
+            store_path.origin().attr,
+            store_path.origin().output,
+        ));
+    }
+
+    let mut it = attrs.iter();
+    if let Some(attr) = it.next() {
+        if it.next().is_some() {
+            writedoc! {err, "
+                The program '{cmd_str}' is currently not installed. It is provided by;
+                several packages. You can install it by typing one of the following:
+            "}
+            .unwrap();
+
+            let has_flakes = has_flakes();
+
+            for attr in &attrs {
+                if has_flakes {
+                    writeln!(err, "  nix profile install nixpkgs#{attr}").unwrap();
+                } else {
+                    writeln!(err, "  nix-env -iA nixpkgs.{attr}").unwrap();
+                }
+            }
+
+            writeln!(err, "\nOr run it once with:").unwrap();
+
+            for attr in attrs {
+                if has_flakes {
+                    writeln!(err, "  nix shell nixpkgs#{attr} -c {cmd_str} ...").unwrap();
+                } else {
+                    writeln!(err, "  nix-shell -p {attr} --run '{cmd_str} ...'").unwrap();
+                }
+            }
+        } else if has_env("NIX_AUTO_INSTALL") {
+            writedoc! {err, "
+                The program '{cmd_str}' is currently not installed. It is provided by
+                the package 'nixpkgs.{attr}', which I will now install for you.
+            "}
+            .unwrap();
+
+            let res = if has_flakes() {
+                Command::new("nix")
+                    .arg("profile")
+                    .arg("install")
+                    .arg(format!("nixpkgs#{attr}"))
+                    .status()
+            } else {
+                Command::new("nix-env")
+                    .arg("-iA")
+                    .arg(format!("nixpkgs.{attr}"))
+                    .status()
+            };
+
+            if res.is_ok_and(|status| status.success()) {
+                let res = Command::new(cmd).args(args).status();
+                if let Ok(status) = res {
+                    if let Some(code) = status.code() {
+                        process::exit(code);
+                    }
+                }
+            } else {
+                writedoc! {err, "
+                    Failed to install nixpkgs.{attr}
+                    {cmd_str}: command not found
+                "}
+                .unwrap();
+            }
+        } else if has_env("NIX_AUTO_RUN") {
+            let res = Command::new("nix-build")
+                .arg("--no-out-link")
+                .arg("-A")
+                .arg(attr)
+                .arg("<nixpkgs>")
+                .status();
+
+            if res.is_ok_and(|status| status.success()) {
+                // TODO: escape or find and alternative
+                let mut cmd = cmd;
+                for arg in args {
+                    cmd.push(" ");
+                    cmd.push(&arg);
+                }
+
+                let res = Command::new("nix-shell")
+                    .arg("-p")
+                    .arg(attr)
+                    .arg("--run")
+                    .arg(cmd)
+                    .status();
+
+                if let Ok(status) = res {
+                    if let Some(code) = status.code() {
+                        process::exit(code);
+                    }
+                }
+            } else {
+                writedoc! {err, "
+                    Failed to install nixpkgs.{attr}
+                    {cmd_str}: command not found
+                "}
+                .unwrap();
+            }
+        } else {
+            let has_flakes = has_flakes();
+
+            writedoc! {err, "
+                The program '{cmd_str}' is currently not installed. You can install it
+                by typing:
+            "}
+            .unwrap();
+
+            if has_flakes {
+                writeln!(err, "  nix profile install nixpkgs#{attr}").unwrap();
+            } else {
+                writeln!(err, "  nix-env -iA nixpkgs.{attr}").unwrap();
+            }
+
+            writeln!(err, "\nOr run it once with:").unwrap();
+
+            if has_flakes {
+                writeln!(err, "  nix shell nixpkgs#{attr} -c {cmd_str} ...").unwrap();
+            } else {
+                writeln!(err, "  nix-shell -p {attr} --run '{cmd_str} ...'").unwrap();
+            }
+        }
+    } else {
+        writeln!(err, "{cmd_str}: command not found").unwrap();
     }
 
     Ok(())
@@ -316,8 +544,23 @@ impl FromStr for Color {
 }
 
 fn main() {
-    let args = Opts::parse();
+    let args: Vec<_> = args_os().collect();
+    if matches!(args.get(1), Some(arg) if arg == "--command-not-found") {
+        if let Err(e) = command_not_found(args) {
+            eprintln!("error: {e}");
 
+            for e in e.iter().skip(1) {
+                eprintln!("caused by: {e}");
+            }
+
+            if let Some(backtrace) = e.backtrace() {
+                eprintln!("backtrace: {backtrace:?}");
+            }
+        }
+        process::exit(127);
+    }
+
+    let args = Opts::parse_from(args);
     let args = process_args(args).unwrap_or_else(|e| e.exit());
 
     if let Err(e) = locate(&args) {

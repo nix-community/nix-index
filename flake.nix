@@ -23,9 +23,8 @@
           inherit ((lib.importTOML ./Cargo.toml).package) version;
 
           src = lib.sourceByRegex self [
-            "(examples|src)(/.*)?"
+            "(etc|examples|src)(/.*)?"
             ''Cargo\.(toml|lock)''
-            ''command-not-found\.sh''
           ];
 
           cargoLock = {
@@ -37,9 +36,9 @@
             ++ lib.optionals stdenv.isDarwin [ darwin.apple_sdk.frameworks.Security ];
 
           postInstall = ''
-            substituteInPlace command-not-found.sh \
+            substituteInPlace etc/command-not-found.* \
               --subst-var out
-            install -Dm555 command-not-found.sh -t $out/etc/profile.d
+            install -Dm444 etc/command-not-found.* -t $out/etc/profile.d
           '';
 
           meta = with lib; {
