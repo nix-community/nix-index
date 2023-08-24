@@ -1,7 +1,18 @@
-## 0.1.7 - [Unreleased]
+## 0.1.8 - [Unreleased]
 ### Added
 ### Fixed
 ### Changed
+### Removed
+
+## 0.1.7 - [Unreleased]
+### Added
+* improve help message for `nix-locate --type` (issue #204)
+* improve error message when `nix-env` is killed by a signal
+### Fixed
+* disable nixpkgs overlays (issue #161)
+* fix Nix command suggestions for command-not-found.sh (issue #185)
+### Changed
+* update dependencies
 ### Removed
 
 ## 0.1.6
