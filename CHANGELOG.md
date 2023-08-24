@@ -4,7 +4,7 @@
 ### Changed
 ### Removed
 
-## 0.1.7 - [Unreleased]
+## 0.1.7
 ### Added
 * improve help message for `nix-locate --type` (issue #204)
 * improve error message when `nix-env` is killed by a signal
