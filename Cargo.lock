@@ -1069,7 +1069,6 @@ dependencies = [
 name = "nix-index"
 version = "0.1.8"
 dependencies = [
- "atty",
  "bincode",
  "brotli-decompressor",
  "byteorder",
