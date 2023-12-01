@@ -51,9 +51,12 @@
         };
       });
 
-      checks = forAllSystems (system: {
-        nix-index = self.packages.${system}.default;
-      });
+      checks = forAllSystems (system:
+          let
+            packages = lib.mapAttrs' (n: lib.nameValuePair "package-${n}") self.packages.${system};
+            devShells = lib.mapAttrs' (n: lib.nameValuePair "devShell-${n}") self.devShells.${system};
+          in packages // devShells
+      );
 
       devShells = forAllSystems (system: {
         minimal = with nixpkgsFor.${system}; mkShell {
