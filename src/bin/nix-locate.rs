@@ -187,7 +187,7 @@ fn process_args(matches: Opts) -> result::Result<Args, clap::Error> {
         file_type: matches
             .r#type
             .unwrap_or_else(|| files::ALL_FILE_TYPES.to_vec()),
-        only_toplevel: matches.top_level,
+        only_toplevel: !matches.all,
         color,
         minimal: matches.minimal,
     };
@@ -255,9 +255,9 @@ struct Opts {
     #[clap(long, name = "HASH")]
     hash: Option<String>,
 
-    /// Only print matches from packages that show up in `nix-env -qa`.
+    /// Print all matches, not only print from packages that show up in `nix-env -qa`.
     #[clap(long)]
-    top_level: bool,
+    all: bool,
 
     /// Only print matches for files that have this type. If the option is given multiple times,
     /// a file will be printed if it has any of the given types.
