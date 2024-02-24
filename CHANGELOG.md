@@ -2,6 +2,9 @@
 ### Added
 ### Fixed
 ### Changed
+
+* `--top-level` is now the default. To use the old default, add `--all`.
+
 ### Removed
 
 ## 0.1.7
