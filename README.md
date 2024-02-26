@@ -29,22 +29,36 @@ camlistore.out                                7,938,952 x /nix/store/xn5ivjdyslx
    $ nix run github:nix-community/nix-index#nix-locate -- bin/hello
    ```
 
+### From Nixpkgs
+
+From your locally configured version Nixpkgs:
+
+```
+$ nix-shell -p nix-index
+[nix-shell]$ nix-index
+[nix-shell]$ nix-locate bin/hello
+```
+
+From the latest rolling release of Nixpkgs:
+
+```
+$ nix-shell -p nix-index -I nixpkgs=channel:nixpkgs-unstable
+```
+
 ### Latest Git version
 
-To install the latest development version of nix-index, simply clone the repo and run `nix-env -if.`:
+To run the latest development version of nix-index:
 
 ```
-$ git clone https://github.com/nix-community/nix-index
-$ cd nix-index
-$ nix-env -if.
+$ nix-shell https://github.com/nix-community/nix-index/tarball/master
 ```
 
-### Stable
+### Stable releases
 
-For the stable version, you can either [checkout](https://git-scm.com/docs/git-checkout) the latest [tag](https://git-scm.com/docs/git-tag) (see the list [here](https://github.com/nix-community/nix-index/tags)) or use Nixpkgs' repositories' and install it with:
+To get a specific stable release, use one of the [release tags](https://github.com/nix-community/nix-index/tags):
 
 ```
-$ nix-env -iA nixos.nix-index
+$ nix-shell https://github.com/nix-community/nix-index/tarball/v0.1.7
 ```
 
 ## Usage

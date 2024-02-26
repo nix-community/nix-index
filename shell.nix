@@ -11,4 +11,4 @@ let
 
   flake = import flake-compat { inherit system; src = ./.; };
 in
-flake.defaultNix
+flake.shellNix
