@@ -7,6 +7,7 @@ use std::process;
 
 use clap::Parser;
 use error_chain::ChainedError;
+use futures::future::Either;
 use futures::{future, StreamExt};
 use nix_index::database::Writer;
 use nix_index::errors::*;
@@ -32,14 +33,17 @@ async fn update_index(args: &Args) -> Result<()> {
     eprintln!("+ querying available packages");
     let fetcher = Fetcher::new(CACHE_URL.to_string()).map_err(ErrorKind::ParseProxy)?;
     let (files, watch) = match cached {
-        Some(v) => v,
-        None => fetch_listings(
-            &fetcher,
-            args.jobs,
-            &args.nixpkgs,
-            vec![args.system.as_deref()],
-            args.show_trace,
-        )?,
+        Some((f, w)) => (Either::Left(f), w),
+        None => {
+            let (f, w) = fetch_listings(
+                &fetcher,
+                args.jobs,
+                &args.nixpkgs,
+                vec![args.system.as_deref()],
+                args.show_trace,
+            )?;
+            (Either::Right(f), w)
+        }
     };
 
     // Treat request errors as if the file list were missing
