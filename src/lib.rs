@@ -23,4 +23,4 @@ pub mod workset;
 /// The URL of the binary cache that we use to fetch file listings and references.
 ///
 /// Hardcoded for now, but may be made a configurable option in the future.
-pub const CACHE_URL: &str = "http://cache.nixos.org";
+pub const CACHE_URL: &str = "https://cache.nixos.org";
