@@ -41,7 +41,6 @@ struct Args {
     package_pattern: Option<String>,
     file_type: Vec<FileType>,
     only_toplevel: bool,
-    color: bool,
     minimal: bool,
 }
 
@@ -122,27 +121,23 @@ fn locate(args: &Args) -> Result<()> {
 
             let path = String::from_utf8_lossy(&path);
 
-            if args.color {
-                let mut prev = 0;
-                for mat in pattern.find_iter(path.as_bytes()) {
-                    // if the match is empty, we need to make sure we don't use string
-                    // indexing because the match may be "inside" a single multibyte character
-                    // in that case (for example, the pattern may match the second byte of a multibyte character)
-                    if mat.start() == mat.end() {
-                        continue;
-                    }
-                    print!(
-                        "{}{}",
-                        &path[prev..mat.start()],
-                        (&path[mat.start()..mat.end()])
-                            .if_supports_color(Stream::Stdout, |txt| txt.red()),
-                    );
-                    prev = mat.end();
+            let mut prev = 0;
+            for mat in pattern.find_iter(path.as_bytes()) {
+                // if the match is empty, we need to make sure we don't use string
+                // indexing because the match may be "inside" a single multibyte character
+                // in that case (for example, the pattern may match the second byte of a multibyte character)
+                if mat.start() == mat.end() {
+                    continue;
                 }
-                println!("{}", &path[prev..]);
-            } else {
-                println!("{}", path);
+                print!(
+                    "{}{}",
+                    &path[prev..mat.start()],
+                    (&path[mat.start()..mat.end()])
+                        .if_supports_color(Stream::Stdout, |txt| txt.red()),
+                );
+                prev = mat.end();
             }
+            println!("{}", &path[prev..]);
         }
     }
 
@@ -172,10 +167,10 @@ fn process_args(matches: Opts) -> result::Result<Args, clap::Error> {
         }
     };
 
-    let color = match matches.color {
-        Color::Auto => atty::is(atty::Stream::Stdout),
-        Color::Always => true,
-        Color::Never => false,
+    match matches.color {
+        Color::Always => owo_colors::set_override(true),
+        Color::Never => owo_colors::set_override(false),
+        _ => {}
     };
 
     let args = Args {
@@ -188,7 +183,6 @@ fn process_args(matches: Opts) -> result::Result<Args, clap::Error> {
             .r#type
             .unwrap_or_else(|| files::ALL_FILE_TYPES.to_vec()),
         only_toplevel: matches.top_level,
-        color,
         minimal: matches.minimal,
     };
     Ok(args)
