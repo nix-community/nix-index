@@ -1,9 +1,8 @@
 use std::fs::File;
 use std::io;
 use std::iter::FromIterator;
-use std::pin::Pin;
 
-use futures::{future, FutureExt, Stream, StreamExt, TryFutureExt};
+use futures::{Stream, StreamExt, TryFutureExt};
 use indexmap::map::Entry;
 use indexmap::IndexMap;
 use rayon::prelude::{IntoParallelRefIterator, ParallelIterator};
@@ -36,8 +35,9 @@ pub const EXTRA_SCOPES: [&str; 5] = [
 ///
 /// If a store path has no file listing (for example, because it is not built by hydra),
 /// the file listing will be `None` instead.
-pub type FileListingStream<'a> =
-    Pin<Box<dyn Stream<Item = Result<Option<(StorePath, String, FileTree)>>> + 'a>>;
+pub trait FileListingStream: Stream<Item = Result<Option<(StorePath, String, FileTree)>>> {}
+impl<T> FileListingStream for T where T: Stream<Item = Result<Option<(StorePath, String, FileTree)>>>
+{}
 
 /// Fetches all the file listings for the full closure of the given starting set of path.
 ///
@@ -51,7 +51,7 @@ fn fetch_listings_impl(
     fetcher: &Fetcher,
     jobs: usize,
     starting_set: Vec<StorePath>,
-) -> (FileListingStream, WorkSetWatch) {
+) -> (impl FileListingStream + '_, WorkSetWatch) {
     // Create the queue that will hold all the paths that still need processing.
     // Initially, only the starting set needs processing.
 
@@ -76,27 +76,28 @@ fn fetch_listings_impl(
 
     // Processes a single store path, fetching the file listing for it and
     // adding its references to the queue
-    let process = move |mut handle: WorkSetHandle<_, _>, path: StorePath| {
-        fetcher
+    let process = move |mut handle: WorkSetHandle<_, _>, path: StorePath| async move {
+        let Some(parsed) = fetcher
             .fetch_references(path.clone())
             .map_err(|e| Error::with_chain(e, ErrorKind::FetchReferences(path)))
-            .and_then(move |parsed| match parsed {
-                Some(parsed) => {
-                    for reference in parsed.references {
-                        let hash = reference.hash().into_owned();
-                        handle.add_work(hash, reference);
-                    }
+            .await?
+        else {
+            return Ok(None);
+        };
 
-                    let path = parsed.store_path;
-                    let nar_path = parsed.nar_path;
-                    future::Either::Left(fetcher.fetch_files(&path).map(move |r| match r {
-                        Err(e) => Err(Error::with_chain(e, ErrorKind::FetchFiles(path))),
-                        Ok(Some(files)) => Ok(Some((path, nar_path, files))),
-                        Ok(None) => Ok(None),
-                    }))
-                }
-                None => future::Either::Right(future::ok(None)),
-            })
+        for reference in parsed.references {
+            let hash = reference.hash().into_owned();
+            handle.add_work(hash, reference);
+        }
+
+        let path = parsed.store_path.clone();
+        let nar_path = parsed.nar_path;
+
+        match fetcher.fetch_files(&parsed.store_path).await {
+            Err(e) => Err(Error::with_chain(e, ErrorKind::FetchFiles(path))),
+            Ok(Some(files)) => Ok(Some((path, nar_path, files))),
+            Ok(None) => Ok(None),
+        }
     };
 
     // Process all paths in the queue, until the queue becomes empty.
@@ -104,13 +105,13 @@ fn fetch_listings_impl(
     let stream = workset
         .map(move |(handle, path)| process(handle, path))
         .buffer_unordered(jobs);
-    (Box::pin(stream), watch)
+    (stream, watch)
 }
 
 /// Tries to load the file listings for all paths from a cache file named `paths.cache`.
 ///
 /// This function is used to implement the `--path-cache` option.
-pub fn try_load_paths_cache() -> Result<Option<(FileListingStream<'static>, WorkSetWatch)>> {
+pub fn try_load_paths_cache() -> Result<Option<(impl FileListingStream, WorkSetWatch)>> {
     let file = match File::open("paths.cache") {
         Ok(file) => file,
         Err(ref e) if e.kind() == io::ErrorKind::NotFound => return Ok(None),
@@ -131,7 +132,7 @@ pub fn try_load_paths_cache() -> Result<Option<(FileListingStream<'static>, Work
         Ok(v)
     });
 
-    Ok(Some((Box::pin(stream), watch)))
+    Ok(Some((stream, watch)))
 }
 
 pub fn fetch_listings<'a>(
@@ -140,7 +141,7 @@ pub fn fetch_listings<'a>(
     nixpkgs: &str,
     systems: Vec<Option<&str>>,
     show_trace: bool,
-) -> Result<(FileListingStream<'a>, WorkSetWatch)> {
+) -> Result<(impl FileListingStream + 'a, WorkSetWatch)> {
     let mut scopes = vec![None];
     scopes.extend(EXTRA_SCOPES.map(Some));
 
