@@ -3,7 +3,7 @@
 ### Fixed
 ### Changed
 
-## 0.1.8 - [Unreleased]
+## 0.1.8
 ### Added
 
 * use HTTPS for cache.nixos.org (#246)
