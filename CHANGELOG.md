@@ -1,7 +1,20 @@
-## 0.1.8 - [Unreleased]
+## 0.1.9 - [Unreleased]
 ### Added
 ### Fixed
 ### Changed
+
+## 0.1.8 - [Unreleased]
+### Added
+
+* use HTTPS for cache.nixos.org (#246)
+* client now use reqwest to obtain HTTPS, content decoding, timeouts and more for free (#247)
+
+### Fixed
+
+* nix-community buildbot CI builds all attributes out of the box (#240)
+
+### Changed
+
 ### Removed
 
 ## 0.1.7
