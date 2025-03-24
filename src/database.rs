@@ -71,10 +71,16 @@ impl Writer {
         files: FileTree,
         filter_prefix: &[u8],
     ) -> io::Result<()> {
+        let entries = files.to_list(filter_prefix);
+
+        // Don't add packages with no file entries to the database.
+        if entries.is_empty() {
+            return Ok(());
+        }
         let writer = self.writer.as_mut().expect("not dropped yet");
         let mut encoder =
             frcode::Encoder::new(writer, b"p".to_vec(), serde_json::to_vec(&path).unwrap());
-        for entry in files.to_list(filter_prefix) {
+        for entry in entries {
             entry.encode(&mut encoder)?;
         }
         Ok(())
