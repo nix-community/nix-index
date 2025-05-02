@@ -48,40 +48,78 @@ $ nix-env -iA nixos.nix-index
 ```
 
 ## Usage
-First, you need to generate an index by running `nix-index` (it takes around 5 minutes) . Then, you can use `nix-locate pattern`. For more information, see `nix-locate --help` and `nix-index --help`.
 
-### Use pre-generated database
+First, you need to generate an index by running `nix-index`, which takes around 10 minutes.
+Then, you can use `nix-locate <pattern>`.
+For more information, see `nix-locate --help` and `nix-index --help`.
 
-[nix-index-database](https://github.com/Mic92/nix-index-database) provides pre-generated databases if you don't want to generate a database locally.
-It also comes with nixos/home-manager modules to use those databases.
+### As a replacement for `command-not-found`
 
-### Usage as a command-not-found replacement
+NixOS allows displaying suggestions for packages using [`command-not-found`](https://search.nixos.org/options?show=programs.command-not-found.enable).
+`nix-index` provides a replacement for `command-not-found` with more elaborate suggestions.
 
-Nix-index provides a "command-not-found" script that can print for you the attribute path of unfound commands in your shell. You can either source `${pkgs.nix-index}/etc/command-not-found.sh` in your own shell init files (works for ZSH and Bash for as far as we know) or you can use the following in home-manager / `/etc/nixos/configuration.nix`:
+#### NixOS
 
 ```nix
-    programs.command-not-found.enable = false;
-    # for home-manager, use programs.bash.initExtra instead
-    programs.bash.interactiveShellInit = ''
-      source ${pkgs.nix-index}/etc/profile.d/command-not-found.sh
-    '';
+{ ... }:
+{
+  programs.command-not-found.enable = false;
+  programs.nix-index = {
+    enable = true;
+    enableBashIntegration = true;
+    enableZshIntegration = true;
+    enableFishIntegration = true;
+  };
+}
 ```
 
-Replace `bash` with `zsh` if you use `zsh`.
+Refer to [`programs.nix-index`](https://search.nixos.org/options?query=nix-index) option documentation for details.
 
 Example output:
 
 ```
 $ blender
-The program 'blender' is currently not installed. You can install it
-by typing:
-  nix-env -iA nixpkgs.blender.out
+The program 'blender' is currently not installed.
+You can install it for all users by adding to your NixOS configuration:
+  environment.systemPackages = with pkgs; [ blender ];
 
 Or run it once with:
-  nix-shell -p blender.out --run ...
+  nix-shell -p blender --run blender
 ```
 
-A [`home-manager` module](https://nix-community.github.io/home-manager/options.html#opt-programs.nix-index.enable) is now available to integrate `nix-index` with `bash`, `zsh`, and `fish` using this script.
+#### Home Manager
+
+```nix
+{ ... }:
+{
+  programs.command-not-found.enable = false;
+  programs.nix-index = {
+    enable = true;
+    enableBashIntegration = true;
+    enableZshIntegration = true;
+    enableFishIntegration = true;
+  };
+}
+```
+
+Refer to Home Manager option documentation on [`programs.nix-index`](https://nix-community.github.io/home-manager/options.xhtml#opt-programs.nix-index.enable) for details.
+
+Example output:
+
+```
+$ blender
+The program 'blender' is currently not installed.
+You can install it for the current user '$USER' by adding to your Home Manager configuration:
+  home.packages = with pkgs; [ blender ];
+
+Or run it once with:
+  nix-shell -p blender --run blender
+```
+
+### With a pre-generated database
+
+[`nix-index-database`](https://github.com/Mic92/nix-index-database) provides pre-generated databases if you don't want to generate a database locally.
+It also comes with modules for NixOS, Home Manager, and nix-darwin to use those databases.
 
 ## Contributing
 If you find any missing features that you would like to implement, I'm very happy about any PRs! You can also create an issue first if the feature is more complex so we can discuss possible implementations.
