@@ -83,6 +83,18 @@ Or run it once with:
 
 A [`home-manager` module](https://nix-community.github.io/home-manager/options.html#opt-programs.nix-index.enable) is now available to integrate `nix-index` with `bash`, `zsh`, and `fish` using this script.
 
+You can also use `command-not-found.nu` as a Nushell hook by adding the
+following to your Nushell config:
+
+```nix
+  programs.nushell = {
+    enable = true;
+    extraConfig = ''
+      $env.config.hooks.command_not_found = source ${pkgs.nix-index}/etc/profile.d/command-not-found.nu
+    '';
+  };
+```
+
 ## Contributing
 If you find any missing features that you would like to implement, I'm very happy about any PRs! You can also create an issue first if the feature is more complex so we can discuss possible implementations.
 
