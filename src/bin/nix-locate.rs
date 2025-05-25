@@ -1,6 +1,5 @@
 //! Tool for searching for files in nixpkgs packages
 use std::collections::HashSet;
-use std::ffi::OsStr;
 use std::path::PathBuf;
 use std::process;
 use std::result;
@@ -240,7 +239,7 @@ struct Opts {
     pattern: String,
 
     /// Directory where the index is stored
-    #[clap(short, long = "db", default_value_os = cache_dir(), env = "NIX_INDEX_DATABASE")]
+    #[clap(short, long = "db", default_value_os = nix_index::cache_dir(), env = "NIX_INDEX_DATABASE")]
     database: PathBuf,
 
     /// Treat PATTERN as regex instead of literal text. Also applies to NAME.

@@ -1,5 +1,4 @@
 //! Tool for generating a nix-index database.
-use std::ffi::OsStr;
 use std::fs::{self, File};
 use std::io::{self, Write};
 use std::path::PathBuf;
@@ -108,13 +107,6 @@ async fn update_index(args: &Args) -> Result<()> {
     Ok(())
 }
 
-fn cache_dir() -> &'static OsStr {
-    let base = xdg::BaseDirectories::with_prefix("nix-index").unwrap();
-    let cache_dir = Box::new(base.get_cache_home());
-    let cache_dir = Box::leak(cache_dir);
-    cache_dir.as_os_str()
-}
-
 /// Builds an index for nix-locate
 #[derive(Debug, Parser)]
 #[clap(author, about, version)]
@@ -124,7 +116,7 @@ struct Args {
     jobs: usize,
 
     /// Directory where the index is stored
-    #[clap(short, long = "db", default_value_os = cache_dir(), env = "NIX_INDEX_DATABASE")]
+    #[clap(short, long = "db", default_value_os = nix_index::cache_dir(), env = "NIX_INDEX_DATABASE")]
     database: PathBuf,
 
     /// Path to nixpkgs for which to build the index, as accepted by nix-env -f
