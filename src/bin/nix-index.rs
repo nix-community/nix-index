@@ -157,7 +157,7 @@ struct Args {
 
     /// Generate shell completions to stdout.
     #[clap(long)]
-    completions: Option<Shell>
+    completions: Option<Shell>,
 }
 
 #[tokio::main]

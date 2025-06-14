@@ -183,18 +183,22 @@ struct Args {
 
     /// Generate shell completions to stdout.
     #[clap(long)]
-    completions: Option<Shell>
+    completions: Option<Shell>,
 }
 
 #[tokio::main]
 async fn main() {
     let args = Args::parse();
-    
+
     if let Some(shell) = args.completions {
-        generate(shell, &mut Args::command(), "nix-channel-index", &mut io::stdout());
+        generate(
+            shell,
+            &mut Args::command(),
+            "nix-channel-index",
+            &mut io::stdout(),
+        );
         return;
     }
-
 
     if let Err(e) = update_index(&args).await {
         eprintln!("error: {}", e);

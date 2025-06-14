@@ -157,9 +157,10 @@ fn locate(args: &Args) -> Result<()> {
 ///
 /// Handles parsing the values of more complex arguments.
 fn process_args(matches: Opts) -> result::Result<Args, clap::Error> {
-    let pattern_arg = matches
-        .pattern
-        .ok_or(Opts::command().error(clap::error::ErrorKind::MissingRequiredArgument, "The argument <PATTERN> is missing"))?;
+    let pattern_arg = matches.pattern.ok_or(Opts::command().error(
+        clap::error::ErrorKind::MissingRequiredArgument,
+        "The argument <PATTERN> is missing",
+    ))?;
     let package_arg = matches.package;
 
     let start_anchor = if matches.at_root { "^" } else { "" };
