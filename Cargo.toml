@@ -49,6 +49,7 @@ xdg = "2.5.2"
 xml-rs = "0.8.20"
 xz2 = "0.1.7"
 zstd = { version = "0.12.4", features = [ "zstdmt" ] }
+clap_complete = "4.5.54"
 
 [dependencies.hyper]
 features = ["client", "http1", "http2", "runtime", "stream"]
