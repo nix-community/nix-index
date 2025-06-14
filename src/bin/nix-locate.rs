@@ -1,13 +1,17 @@
 //! Tool for searching for files in nixpkgs packages
 use std::collections::HashSet;
 use std::ffi::OsStr;
+use std::io;
 use std::path::PathBuf;
 use std::process;
 use std::result;
 use std::str;
 use std::str::FromStr;
 
+use clap::CommandFactory;
 use clap::{value_parser, Parser};
+use clap_complete::generate;
+use clap_complete::Shell;
 use error_chain::error_chain;
 use nix_index::database;
 use nix_index::files::{self, FileTreeEntry, FileType};
@@ -153,7 +157,9 @@ fn locate(args: &Args) -> Result<()> {
 ///
 /// Handles parsing the values of more complex arguments.
 fn process_args(matches: Opts) -> result::Result<Args, clap::Error> {
-    let pattern_arg = matches.pattern;
+    let pattern_arg = matches
+        .pattern
+        .ok_or(Opts::command().error(clap::error::ErrorKind::MissingRequiredArgument, "The argument <PATTERN> is missing"))?;
     let package_arg = matches.package;
 
     let start_anchor = if matches.at_root { "^" } else { "" };
@@ -237,7 +243,7 @@ fn cache_dir() -> &'static OsStr {
 struct Opts {
     /// Pattern for which to search
     // #[clap(name = "PATTERN")]
-    pattern: String,
+    pattern: Option<String>,
 
     /// Directory where the index is stored
     #[clap(short, long = "db", default_value_os = cache_dir(), env = "NIX_INDEX_DATABASE")]
@@ -293,6 +299,10 @@ struct Opts {
     /// store path are omitted. This is useful for scripts that use the output of nix-locate.
     #[clap(long)]
     minimal: bool,
+
+    /// Generate shell completions to stdout.
+    #[clap(long)]
+    completions: Option<Shell>,
 }
 
 #[derive(clap::ValueEnum, Clone, Copy, Debug)]
@@ -317,6 +327,11 @@ impl FromStr for Color {
 
 fn main() {
     let args = Opts::parse();
+
+    if let Some(shell) = args.completions {
+        generate(shell, &mut Opts::command(), "nix-locate", &mut io::stdout());
+        return;
+    }
 
     let args = process_args(args).unwrap_or_else(|e| e.exit());
 

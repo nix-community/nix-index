@@ -5,7 +5,8 @@ use std::os::unix::ffi::OsStringExt;
 use std::path::PathBuf;
 use std::process;
 
-use clap::Parser;
+use clap::{CommandFactory, Parser};
+use clap_complete::{generate, Shell};
 use error_chain::ChainedError;
 use futures::{future, StreamExt};
 use nix_index::files::FileNode;
@@ -179,11 +180,21 @@ struct Args {
     /// Show a stack trace in the case of a Nix evaluation error
     #[clap(long)]
     show_trace: bool,
+
+    /// Generate shell completions to stdout.
+    #[clap(long)]
+    completions: Option<Shell>
 }
 
 #[tokio::main]
 async fn main() {
     let args = Args::parse();
+    
+    if let Some(shell) = args.completions {
+        generate(shell, &mut Args::command(), "nix-channel-index", &mut io::stdout());
+        return;
+    }
+
 
     if let Err(e) = update_index(&args).await {
         eprintln!("error: {}", e);

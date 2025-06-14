@@ -5,7 +5,8 @@ use std::io::{self, Write};
 use std::path::PathBuf;
 use std::process;
 
-use clap::Parser;
+use clap::{CommandFactory, Parser};
+use clap_complete::{generate, Shell};
 use error_chain::ChainedError;
 use futures::future::Either;
 use futures::{future, StreamExt};
@@ -153,11 +154,20 @@ struct Args {
     /// Note: does not check if the cached data is up to date! Use only for development.
     #[clap(long)]
     path_cache: bool,
+
+    /// Generate shell completions to stdout.
+    #[clap(long)]
+    completions: Option<Shell>
 }
 
 #[tokio::main]
 async fn main() {
     let args = Args::parse();
+
+    if let Some(shell) = args.completions {
+        generate(shell, &mut Args::command(), "nix-index", &mut io::stdout());
+        return;
+    }
 
     if let Err(e) = update_index(&args).await {
         eprintln!("error: {}", e);
