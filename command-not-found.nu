@@ -29,7 +29,7 @@
     ]
     $lines | str join "\n"
   }
-  let pkgs = (@out@/bin/nix-locate --minimal --no-group --type x --type s --top-level --whole-name --at-root $"/bin/($cmd_name)" | lines)
+  let pkgs = (@out@/bin/nix-locate --minimal --no-group --type x --type s --whole-name --at-root $"/bin/($cmd_name)" | lines)
   let len = ($pkgs | length)
   let ret = match $len {
     0 => null,
