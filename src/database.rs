@@ -479,10 +479,7 @@ impl<'a, 'b> Iterator for ReaderIter<'a, 'b> {
     type Item = Result<(StorePath, FileTreeEntry)>;
 
     fn next(&mut self) -> Option<Self::Item> {
-        match self.next_match() {
-            Err(e) => Some(Err(e)),
-            Ok(v) => v.map(Ok),
-        }
+        self.next_match().transpose()
     }
 }
 

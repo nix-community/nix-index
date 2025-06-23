@@ -1,19 +1,20 @@
 //! Tool for searching for files in nixpkgs packages
+use std::borrow::Cow;
 use std::collections::HashSet;
-use std::ffi::OsStr;
 use std::path::PathBuf;
 use std::process;
 use std::result;
 use std::str;
 use std::str::FromStr;
 
-use clap::{value_parser, Parser};
+use clap::{value_parser, Args, Parser};
 use error_chain::error_chain;
 use nix_index::database;
 use nix_index::files::{self, FileTreeEntry, FileType};
 use owo_colors::{OwoColorize, Stream};
 use regex::bytes::Regex;
 use separator::Separatable;
+use serde::Serialize;
 
 error_chain! {
     errors {
@@ -30,8 +31,14 @@ error_chain! {
     }
 }
 
+enum OutputFormat {
+    Full,
+    Minimal,
+    JsonLines,
+}
+
 /// The struct holding the parsed arguments for searching
-struct Args {
+struct LocateArgs {
     /// Path of the nix-index database.
     database: PathBuf,
     /// The pattern to search for. This is always in regex syntax.
@@ -42,11 +49,11 @@ struct Args {
     file_type: Vec<FileType>,
     only_toplevel: bool,
     color: bool,
-    minimal: bool,
+    format: OutputFormat,
 }
 
 /// The main function of this module: searches with the given options in the database.
-fn locate(args: &Args) -> Result<()> {
+fn locate(args: &LocateArgs) -> Result<()> {
     // Build the regular expression matcher
     let pattern = Regex::new(&args.pattern).chain_err(|| ErrorKind::Grep(args.pattern.clone()))?;
     let package_pattern = if let Some(ref pat) = args.package_pattern {
@@ -106,42 +113,77 @@ fn locate(args: &Args) -> Result<()> {
             attr = format!("({})", attr);
         }
 
-        if args.minimal {
-            // only print each package once, even if there are multiple matches
-            if printed_attrs.insert(attr.clone()) {
-                println!("{}", attr);
-            }
-        } else {
-            print!(
-                "{:<40} {:>14} {:>1} {}",
-                attr,
-                size.separated_string(),
-                typ,
-                store_path.as_str()
-            );
-
-            let path = String::from_utf8_lossy(&path);
-
-            if args.color {
-                let mut prev = 0;
-                for mat in pattern.find_iter(path.as_bytes()) {
-                    // if the match is empty, we need to make sure we don't use string
-                    // indexing because the match may be "inside" a single multibyte character
-                    // in that case (for example, the pattern may match the second byte of a multibyte character)
-                    if mat.start() == mat.end() {
-                        continue;
-                    }
-                    print!(
-                        "{}{}",
-                        &path[prev..mat.start()],
-                        (&path[mat.start()..mat.end()])
-                            .if_supports_color(Stream::Stdout, |txt| txt.red()),
-                    );
-                    prev = mat.end();
+        match args.format {
+            OutputFormat::JsonLines => {
+                #[derive(Debug, Serialize)]
+                struct Info<'a> {
+                    attr: &'a str,
+                    output_name: &'a str,
+                    toplevel: bool,
+                    full_attr: String,
+                    r#type: &'static str,
+                    size: u64,
+                    store_path: Cow<'a, str>,
+                    path: Cow<'a, str>,
                 }
-                println!("{}", &path[prev..]);
-            } else {
-                println!("{}", path);
+
+                let o = store_path.origin();
+
+                let info = Info {
+                    attr: o.attr.as_str(),
+                    output_name: o.output.as_str(),
+                    toplevel: o.toplevel,
+                    full_attr: attr,
+                    r#type: typ,
+                    size,
+                    store_path: store_path.as_str(),
+                    path: String::from_utf8_lossy(&path),
+                };
+
+                println!(
+                    "{}",
+                    serde_json::to_string(&info)
+                        .expect("serialization should never fail, this is a bug")
+                );
+            }
+            OutputFormat::Minimal => {
+                // only print each package once, even if there are multiple matches
+                if printed_attrs.insert(attr.clone()) {
+                    println!("{}", attr);
+                }
+            }
+            OutputFormat::Full => {
+                print!(
+                    "{:<40} {:>14} {:>1} {}",
+                    attr,
+                    size.separated_string(),
+                    typ,
+                    store_path.as_str()
+                );
+
+                let path = String::from_utf8_lossy(&path);
+
+                if args.color {
+                    let mut prev = 0;
+                    for mat in pattern.find_iter(path.as_bytes()) {
+                        // if the match is empty, we need to make sure we don't use string
+                        // indexing because the match may be "inside" a single multibyte character
+                        // in that case (for example, the pattern may match the second byte of a multibyte character)
+                        if mat.start() == mat.end() {
+                            continue;
+                        }
+                        print!(
+                            "{}{}",
+                            &path[prev..mat.start()],
+                            (&path[mat.start()..mat.end()])
+                                .if_supports_color(Stream::Stdout, |txt| txt.red()),
+                        );
+                        prev = mat.end();
+                    }
+                    println!("{}", &path[prev..]);
+                } else {
+                    println!("{}", path);
+                }
             }
         }
     }
@@ -152,7 +194,7 @@ fn locate(args: &Args) -> Result<()> {
 /// Extract the parsed arguments for clap's arg matches.
 ///
 /// Handles parsing the values of more complex arguments.
-fn process_args(matches: Opts) -> result::Result<Args, clap::Error> {
+fn process_args(matches: Opts) -> result::Result<LocateArgs, clap::Error> {
     let pattern_arg = matches.pattern;
     let package_arg = matches.package;
 
@@ -178,7 +220,7 @@ fn process_args(matches: Opts) -> result::Result<Args, clap::Error> {
         Color::Never => false,
     };
 
-    let args = Args {
+    let args = LocateArgs {
         database: matches.database,
         group: !matches.no_group,
         pattern: make_pattern(&pattern_arg, true),
@@ -189,7 +231,7 @@ fn process_args(matches: Opts) -> result::Result<Args, clap::Error> {
             .unwrap_or_else(|| files::ALL_FILE_TYPES.to_vec()),
         only_toplevel: !matches.all,
         color,
-        minimal: matches.minimal,
+        format: matches.format.into_enum(),
     };
     Ok(args)
 }
@@ -224,11 +266,29 @@ Limitations
   but we know that `xmonad-with-packages.out` requires it.
 "#;
 
-fn cache_dir() -> &'static OsStr {
-    let base = xdg::BaseDirectories::with_prefix("nix-index").unwrap();
-    let cache_dir = Box::new(base.get_cache_home());
-    let cache_dir = Box::leak(cache_dir);
-    cache_dir.as_os_str()
+#[derive(Copy, Clone, Debug, Args)]
+#[group(multiple = false)]
+struct FormatArgs {
+    /// Only print attribute names of found files or directories. Other details such as size or
+    /// store path are omitted. This is useful for scripts that use the output of nix-locate.
+    #[clap(long)]
+    minimal: bool,
+
+    /// Print matches as json objects separated by newlines
+    #[clap(long)]
+    json_lines: bool,
+}
+
+impl FormatArgs {
+    fn into_enum(self) -> OutputFormat {
+        if self.json_lines {
+            OutputFormat::JsonLines
+        } else if self.minimal {
+            OutputFormat::Minimal
+        } else {
+            OutputFormat::Full
+        }
+    }
 }
 
 /// Quickly finds the derivation providing a certain file
@@ -240,7 +300,7 @@ struct Opts {
     pattern: String,
 
     /// Directory where the index is stored
-    #[clap(short, long = "db", default_value_os = cache_dir(), env = "NIX_INDEX_DATABASE")]
+    #[clap(short, long = "db", default_value_os = nix_index::cache_dir(), env = "NIX_INDEX_DATABASE")]
     database: PathBuf,
 
     /// Treat PATTERN as regex instead of literal text. Also applies to NAME.
@@ -289,10 +349,8 @@ struct Opts {
     #[clap(long)]
     at_root: bool,
 
-    /// Only print attribute names of found files or directories. Other details such as size or
-    /// store path are omitted. This is useful for scripts that use the output of nix-locate.
-    #[clap(long)]
-    minimal: bool,
+    #[clap(flatten)]
+    format: FormatArgs,
 }
 
 #[derive(clap::ValueEnum, Clone, Copy, Debug)]
