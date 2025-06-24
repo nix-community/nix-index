@@ -4,9 +4,9 @@ use crate::package::StorePath;
 
 error_chain::error_chain! {
     errors {
-        QueryPackages {
+        QueryPackages(set: Option<String>) {
             description("query packages error")
-            display("querying available packages failed")
+            display("querying available packages in set '{}' failed", set.as_ref().unwrap_or(&".".to_string()))
         }
         FetchFiles(path: StorePath) {
             description("file listing fetch error")

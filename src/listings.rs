@@ -157,10 +157,20 @@ pub fn fetch_listings<'a>(
     let all_paths = all_queries
         .par_iter()
         .flat_map_iter(|&(system, scope)| {
-            nixpkgs::query_packages(nixpkgs, system, scope.as_deref(), show_trace)
-                .map(|x| x.chain_err(|| ErrorKind::QueryPackages))
+            nixpkgs::query_packages(nixpkgs, system, scope.as_deref(), show_trace).map(|x| {
+                x.chain_err(|| ErrorKind::QueryPackages(scope.as_deref().map(|s| s.to_string())))
+            })
         })
-        .collect::<Result<_>>()?;
+        .filter_map(|res| match res {
+            Ok(path) => Some(path),
+            Err(e) => {
+                // Older versions of nixpkgs may not have all scopes, so we skip them instead
+                // of completely bailing out.
+                eprintln!("Error getting package set: {e}");
+                None
+            }
+        })
+        .collect::<Vec<_>>();
 
     Ok(fetch_listings_impl(fetcher, jobs, all_paths))
 }
