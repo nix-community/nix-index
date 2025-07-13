@@ -8,7 +8,7 @@ use std::process;
 use clap::Parser;
 use error_chain::ChainedError;
 use futures::{future, StreamExt};
-use nix_index::files::FileNode;
+use nix_index::files::{FileNode, FileType};
 use nix_index::hydra::Fetcher;
 use nix_index::listings::fetch_listings;
 use nix_index::{errors::*, CACHE_URL};
@@ -121,6 +121,12 @@ async fn update_index(args: &Args) -> Result<()> {
                 }
 
                 if let Ok(debuginfo) = path.strip_prefix("/lib/debug/.build-id") {
+                    if item.node.get_type() == FileType::Symlink {
+                        // only process actual files here, as there could be symlinks
+                        // to the original binary, sources, etc, which we don't care about
+                        continue;
+                    }
+
                     let build_id: String = debuginfo
                         .to_string_lossy()
                         .replace('/', "")
