@@ -12,7 +12,7 @@ use nix_index::files::{FileNode, FileType};
 use nix_index::hydra::Fetcher;
 use nix_index::listings::fetch_listings;
 use nix_index::{errors::*, CACHE_URL};
-use rusqlite::{Connection, DatabaseName};
+use rusqlite::Connection;
 
 /// The main function of this module: creates a new command-not-found database.
 async fn update_index(args: &Args) -> Result<()> {
@@ -149,11 +149,11 @@ async fn update_index(args: &Args) -> Result<()> {
     eprint!("+ dumping index");
 
     connection
-        .backup(DatabaseName::Main, &args.output, None)
+        .backup("main", &args.output, None)
         .map_err(|_| ErrorKind::CreateDatabase(args.output.clone()))?;
 
     debug_connection
-        .backup(DatabaseName::Main, &args.debug_output, None)
+        .backup("main", &args.debug_output, None)
         .map_err(|_| ErrorKind::CreateDatabase(args.debug_output.clone()))?;
 
     Ok(())

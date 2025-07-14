@@ -15,6 +15,7 @@ use regex::bytes::Regex;
 use regex_syntax::ast::{
     Alternation, Assertion, AssertionKind, Ast, Concat, Group, Literal, Repetition,
 };
+use regex_syntax::hir::{Hir, HirKind, Look};
 use serde_json;
 use zstd;
 
@@ -242,21 +243,18 @@ impl<'a, 'b> Query<'a, 'b> {
         {
             let mut stack = vec![&mut expr];
             while let Some(e) = stack.pop() {
-                match *e {
-                    Ast::Assertion(Assertion {
-                        kind: AssertionKind::StartLine,
-                        span,
-                    }) => {
-                        *e = Ast::Literal(Literal {
-                            span,
+                match e {
+                    Ast::Assertion(a) if a.kind == AssertionKind::StartLine => {
+                        *e = Ast::Literal(Box::new(Literal {
+                            span: a.span,
                             c: '\0',
                             kind: regex_syntax::ast::LiteralKind::Verbatim,
-                        })
+                        }))
                     }
-                    Ast::Group(Group { ref mut ast, .. }) => stack.push(ast),
-                    Ast::Repetition(Repetition { ref mut ast, .. }) => stack.push(ast),
-                    Ast::Concat(Concat { ref mut asts, .. })
-                    | Ast::Alternation(Alternation { ref mut asts, .. }) => stack.extend(asts),
+                    Ast::Group(g) => stack.push(&mut g.ast),
+                    Ast::Repetition(r) => stack.push(&mut r.ast),
+                    Ast::Concat(c) => stack.extend(c.asts.iter_mut()),
+                    Ast::Alternation(a) => stack.extend(a.asts.iter_mut()),
                     _ => {}
                 }
             }

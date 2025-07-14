@@ -121,7 +121,7 @@ pub fn try_load_paths_cache() -> Result<Option<(impl FileListingStream, WorkSetW
 
     let mut input = io::BufReader::new(file);
     let fetched: Vec<(StorePath, String, FileTree)> =
-        bincode::deserialize_from(&mut input).chain_err(|| ErrorKind::LoadPathsCache)?;
+        bincode::serde::decode_from_std_read(&mut input, bincode::config::standard()).chain_err(|| ErrorKind::LoadPathsCache)?;
     let workset = WorkSet::from_iter(
         fetched
             .into_iter()

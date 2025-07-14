@@ -97,7 +97,7 @@ async fn update_index(args: &Args) -> Result<()> {
         let mut output = io::BufWriter::new(
             File::create("paths.cache").chain_err(|| ErrorKind::WritePathsCache)?,
         );
-        bincode::serialize_into(&mut output, &results).chain_err(|| ErrorKind::WritePathsCache)?;
+        bincode::serde::encode_into_std_write(&results, &mut output, bincode::config::standard()).chain_err(|| ErrorKind::WritePathsCache)?;
     }
 
     let index_size = db
@@ -109,8 +109,8 @@ async fn update_index(args: &Args) -> Result<()> {
 }
 
 fn cache_dir() -> &'static OsStr {
-    let base = xdg::BaseDirectories::with_prefix("nix-index").unwrap();
-    let cache_dir = Box::new(base.get_cache_home());
+    let base = xdg::BaseDirectories::with_prefix("nix-index");
+    let cache_dir = Box::new(base.get_cache_home().unwrap());
     let cache_dir = Box::leak(cache_dir);
     cache_dir.as_os_str()
 }

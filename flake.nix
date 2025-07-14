@@ -33,9 +33,7 @@
             lockFile = ./Cargo.lock;
           };
 
-          nativeBuildInputs = [ pkg-config ];
-          buildInputs = [ openssl curl sqlite ]
-            ++ lib.optionals stdenv.isDarwin [ darwin.apple_sdk.frameworks.Security ];
+          buildInputs = [ sqlite ];
 
           postInstall = ''
             substituteInPlace command-not-found.sh \
@@ -66,18 +64,9 @@
         minimal = with nixpkgsFor.${system}; mkShell {
           name = "nix-index";
 
-          nativeBuildInputs = [
-            pkg-config
-          ];
+          nativeBuildInputs = [ pkg-config ];
 
-          buildInputs = [
-            openssl
-            sqlite
-          ] ++ lib.optionals stdenv.isDarwin [
-            darwin.apple_sdk.frameworks.Security
-          ];
-
-          env.LD_LIBRARY_PATH = lib.makeLibraryPath [ openssl ];
+          buildInputs = [ sqlite ];
         };
 
         default = with nixpkgsFor.${system}; mkShell {
@@ -87,10 +76,7 @@
 
           nativeBuildInputs = [ rustc cargo clippy rustfmt ];
 
-          env = {
-            LD_LIBRARY_PATH = lib.makeLibraryPath [ openssl ];
-            RUST_SRC_PATH = rustPlatform.rustLibSrc;
-          };
+          env.RUST_SRC_PATH = rustPlatform.rustLibSrc;
         };
       });
 

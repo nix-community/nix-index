@@ -225,8 +225,8 @@ Limitations
 "#;
 
 fn cache_dir() -> &'static OsStr {
-    let base = xdg::BaseDirectories::with_prefix("nix-index").unwrap();
-    let cache_dir = Box::new(base.get_cache_home());
+    let base = xdg::BaseDirectories::with_prefix("nix-index");
+    let cache_dir = Box::new(base.get_cache_home().unwrap());
     let cache_dir = Box::leak(cache_dir);
     cache_dir.as_os_str()
 }
