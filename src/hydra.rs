@@ -12,7 +12,6 @@ use std::result;
 use std::str::{self, Utf8Error};
 use std::time::{Duration, Instant};
 
-use error_chain::error_chain;
 use futures::future;
 use futures::{Future, TryFutureExt};
 use reqwest::header::{HeaderValue, ACCEPT_ENCODING};
@@ -22,6 +21,7 @@ use serde::de::{Deserializer, MapAccess, Visitor};
 use serde::{self, Deserialize};
 use serde_bytes::ByteBuf;
 use serde_json;
+use thiserror::Error;
 use tokio::time::error::Elapsed;
 use tokio_retry::strategy::ExponentialBackoff;
 use tokio_retry::{self, Retry};
@@ -31,57 +31,54 @@ use crate::files::FileTree;
 use crate::package::{PathOrigin, StorePath};
 use crate::util;
 
-error_chain! {
-    errors {
-        Http(url: String, code: StatusCode) {
-            description("http status code error")
-            display("request GET '{}' failed with HTTP error {}", url, code)
-        }
-        ParseResponse(url: String, tmp_file: Option<PathBuf>) {
-            description("response parse error")
-            display("response to GET '{}' failed to parse{}", url, tmp_file.as_ref().map_or("".into(), |f| format!(" (response saved to {})", f.to_string_lossy())))
-        }
-        ParseStorePath(url: String, path: String) {
-            description("store path parse error")
-            display("response to GET '{}' contained invalid store path '{}', expected string matching format $(NIX_STORE_DIR)$(HASH)-$(NAME)", url, path)
-        }
-        Unicode(url: String, bytes: Vec<u8>, err: Utf8Error) {
-            description("unicode error")
-            display("response to GET '{}' contained invalid unicode byte {}: {}", url, bytes[err.valid_up_to()], err)
-        }
-        Decode(url: String) {
-            description("decoder error")
-            display("response to GET '{}' could not be decoded", url)
-        }
-        UnsupportedEncoding(url: String, encoding: Option<String>) {
-            description("unsupported content-encoding")
-            display(
-                "response to GET '{}' had unsupported content-encoding ({})",
-                url,
-                encoding.as_ref().map_or("not present".to_string(), |v| format!("'{}'", v)),
-            )
-        }
-        Timeout {
-            description("timeout exceeded")
-        }
-        TimerError {
-            description("timer failure")
-        }
-        ParseProxy(url: String) {
-            description("proxy config error")
-            display("Can not parse proxy url ({})", url)
-        }
-    }
-    foreign_links {
-        Reqwest(reqwest::Error);
-    }
+#[derive(Error, Debug)]
+pub enum Error {
+    #[error("request GET '{url}' failed with HTTP error {code}")]
+    Http { url: String, code: StatusCode },
+    #[error(
+        "response to GET '{url}' failed to parse{}",
+        tmp_file.as_ref().map_or("".into(), |f| format!(" (response saved to {})", f.to_string_lossy()))
+    )]
+    ParseResponse {
+        url: String,
+        tmp_file: Option<PathBuf>,
+    },
+    #[error("response to GET '{url}' contained invalid store path '{path}', expected string matching format $(NIX_STORE_DIR)$(HASH)-$(NAME)")]
+    ParseStorePath { url: String, path: String },
+    #[error("response to GET '{url}' contained invalid unicode byte {}: {err}", bytes[err.valid_up_to()])]
+    Unicode {
+        url: String,
+        bytes: Vec<u8>,
+        #[source]
+        err: Utf8Error,
+    },
+    #[error("response to GET '{url}' could not be decoded")]
+    Decode { url: String },
+    #[error(
+        "response to GET '{url}' had unsupported content-encoding ({})",
+        encoding.as_ref().map_or("not present".to_string(), |v| format!("'{}'", v))
+    )]
+    UnsupportedEncoding {
+        url: String,
+        encoding: Option<String>,
+    },
+    #[error("timeout exceeded")]
+    Timeout,
+    #[error("timer failure")]
+    TimerError,
+    #[error("Can not parse proxy url ({url})")]
+    ParseProxy { url: String },
+    #[error("HTTP client error: {0}")]
+    Reqwest(#[from] reqwest::Error),
 }
 
 impl From<Elapsed> for Error {
     fn from(_err: Elapsed) -> Self {
-        Error::from(ErrorKind::Timeout)
+        Error::Timeout
     }
 }
+
+type Result<T> = std::result::Result<T, Error>;
 
 /// A Fetcher allows you to make requests to Hydra/the binary cache.
 ///
@@ -167,7 +164,7 @@ impl Fetcher {
         }
 
         if !code.is_success() {
-            return Err(Error::from(ErrorKind::Http(url, code)));
+            return Err(Error::Http { url, code });
         }
 
         let decoded = res.bytes().await?.into();
@@ -198,8 +195,11 @@ impl Fetcher {
             let mut result = Vec::new();
             for line in data.split(|x| x == &b'\n') {
                 if let Some(line) = line.strip_prefix(b"References: ") {
-                    let line = str::from_utf8(line)
-                        .map_err(|e| ErrorKind::Unicode(url.clone(), line.to_vec(), e))?;
+                    let line = str::from_utf8(line).map_err(|e| Error::Unicode {
+                        url: url.clone(),
+                        bytes: line.to_vec(),
+                        err: e,
+                    })?;
                     result = line
                         .split_whitespace()
                         .map(|new_path| {
@@ -208,24 +208,37 @@ impl Fetcher {
                                 ..path.origin().into_owned()
                             };
                             StorePath::parse(new_origin, new_path).ok_or_else(|| {
-                                ErrorKind::ParseStorePath(url.clone(), new_path.to_string()).into()
+                                Error::ParseStorePath {
+                                    url: url.clone(),
+                                    path: new_path.to_string(),
+                                }
                             })
                         })
                         .collect::<Result<Vec<_>>>()?;
                 }
 
                 if let Some(line) = line.strip_prefix(b"StorePath: ") {
-                    let line = str::from_utf8(line)
-                        .map_err(|e| ErrorKind::Unicode(url.clone(), line.to_vec(), e))?;
+                    let line = str::from_utf8(line).map_err(|e| Error::Unicode {
+                        url: url.clone(),
+                        bytes: line.to_vec(),
+                        err: e,
+                    })?;
                     let line = line.trim();
 
-                    path = StorePath::parse(path.origin().into_owned(), line)
-                        .ok_or_else(|| ErrorKind::ParseStorePath(url.clone(), line.to_string()))?;
+                    path = StorePath::parse(path.origin().into_owned(), line).ok_or_else(|| {
+                        Error::ParseStorePath {
+                            url: url.clone(),
+                            path: line.to_string(),
+                        }
+                    })?;
                 }
 
                 if let Some(line) = line.strip_prefix(b"URL: ") {
-                    let line = str::from_utf8(line)
-                        .map_err(|e| ErrorKind::Unicode(url.clone(), line.to_vec(), e))?;
+                    let line = str::from_utf8(line).map_err(|e| Error::Unicode {
+                        url: url.clone(),
+                        bytes: line.to_vec(),
+                        err: e,
+                    })?;
                     let line = line.trim();
 
                     nar_path = Some(line.to_owned());
@@ -234,8 +247,10 @@ impl Fetcher {
 
             Ok(Some(ParsedNAR {
                 store_path: path,
-                nar_path: nar_path
-                    .ok_or(ErrorKind::ParseStorePath(url, "no URL line found".into()))?,
+                nar_path: nar_path.ok_or(Error::ParseStorePath {
+                    url,
+                    path: "no URL line found".into(),
+                })?,
                 references: result,
             }))
         };
@@ -265,7 +280,7 @@ impl Fetcher {
                 let mut unpacked = vec![];
                 XzDecoder::new(&body[..])
                     .read_to_end(&mut unpacked)
-                    .map_err(|e| ErrorKind::Decode(e.to_string()))?;
+                    .map_err(|e| Error::Decode { url: e.to_string() })?;
 
                 unpacked
             }
@@ -273,8 +288,9 @@ impl Fetcher {
 
         let now = Instant::now();
         let response: FileListingResponse =
-            serde_json::from_slice(&contents[..]).chain_err(|| {
-                ErrorKind::ParseResponse(url, util::write_temp_file("file_listing.json", &contents))
+            serde_json::from_slice(&contents[..]).map_err(|_| Error::ParseResponse {
+                url,
+                tmp_file: util::write_temp_file("file_listing.json", &contents),
             })?;
         let duration = now.elapsed();
 

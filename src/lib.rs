@@ -1,10 +1,10 @@
 #![warn(
-        clippy::manual_filter_map,
-        clippy::map_unwrap_or,
-        clippy::module_name_repetitions,
-        clippy::print_stdout,
-        clippy::unwrap_used,
-    )]
+    clippy::manual_filter_map,
+    clippy::map_unwrap_or,
+    clippy::module_name_repetitions,
+    clippy::print_stdout,
+    clippy::unwrap_used
+)]
 
 pub mod database;
 pub mod errors;

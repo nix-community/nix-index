@@ -56,33 +56,29 @@ use std::cmp;
 use std::io::{self, BufRead, Write};
 use std::ops::{Deref, DerefMut};
 
-use error_chain::{bail, error_chain};
 use memchr;
+use thiserror::Error;
 
-error_chain! {
-    foreign_links {
-        Io(io::Error);
-    }
-    errors {
-        SharedOutOfRange { previous_len: usize, shared_len: isize } {
-            description("shared prefix length out of bounds")
-            display("length of shared prefix must be >= 0 and <= {} (length of previous item), but found: {}", previous_len, shared_len)
-        }
-        SharedOverflow { shared_len: isize, diff: isize } {
-            description("shared prefix length too big (overflow)")
-            display("length of shared prefix too big: cannot add {} to {} without overflow", shared_len, diff)
-        }
-        MissingNul {
-            description("missing terminating NUL byte for entry")
-        }
-        MissingNewline {
-            description("missing newline separator for entry")
-        }
-        MissingPrefixDifferential {
-            description("missing the shared prefix length differential for entry")
-        }
-    }
+#[derive(Error, Debug)]
+pub enum Error {
+    #[error("I/O error: {0}")]
+    Io(#[from] io::Error),
+    #[error("length of shared prefix must be >= 0 and <= {previous_len} (length of previous item), but found: {shared_len}")]
+    SharedOutOfRange {
+        previous_len: usize,
+        shared_len: isize,
+    },
+    #[error("length of shared prefix too big: cannot add {shared_len} to {diff} without overflow")]
+    SharedOverflow { shared_len: isize, diff: isize },
+    #[error("missing terminating NUL byte for entry")]
+    MissingNul,
+    #[error("missing newline separator for entry")]
+    MissingNewline,
+    #[error("missing the shared prefix length differential for entry")]
+    MissingPrefixDifferential,
 }
+
+type Result<T> = std::result::Result<T, Error>;
 
 /// A buffer that may be resizable or not. This is used for decoding,
 /// where we want to make the buffer resizable as long as we haven't decoded
@@ -190,7 +186,7 @@ impl<R: BufRead> Decoder<R> {
         }
 
         if self.shared_len < 0 || self.last_path + shared_len > self.pos {
-            bail!(ErrorKind::SharedOutOfRange {
+            return Err(Error::SharedOutOfRange {
                 previous_len: self.pos - self.last_path,
                 shared_len: self.shared_len,
             });
@@ -259,7 +255,7 @@ impl<R: BufRead> Decoder<R> {
         let mut buf = [0; 1];
         self.reader
             .read_exact(&mut buf)
-            .chain_err(|| ErrorKind::MissingPrefixDifferential)?;
+            .map_err(|_| Error::MissingPrefixDifferential)?;
 
         if buf[0] != 0x80 {
             Ok((buf[0] as i8) as i16)
@@ -267,7 +263,7 @@ impl<R: BufRead> Decoder<R> {
             let mut buf = [0; 2];
             self.reader
                 .read_exact(&mut buf)
-                .chain_err(|| ErrorKind::MissingPrefixDifferential)?;
+                .map_err(|_| Error::MissingPrefixDifferential)?;
             let high = buf[0] as i16;
             let low = buf[1] as i16;
             Ok(high << 8 | low)
@@ -358,13 +354,13 @@ impl<R: BufRead> Decoder<R> {
             let diff = self.decode_prefix_diff()? as isize;
 
             // Update the shared len
-            self.shared_len =
-                self.shared_len
-                    .checked_add(diff)
-                    .ok_or(ErrorKind::SharedOverflow {
-                        shared_len: self.shared_len,
-                        diff,
-                    })?;
+            self.shared_len = self
+                .shared_len
+                .checked_add(diff)
+                .ok_or(Error::SharedOverflow {
+                    shared_len: self.shared_len,
+                    diff,
+                })?;
 
             // Copy the shared prefix
             if !self.copy_shared()? {
@@ -373,9 +369,8 @@ impl<R: BufRead> Decoder<R> {
         }
 
         // Since we don't want to return partially decoded items, we need to find the end of the last entry.
-        self.partial_entry_start = memchr::memrchr(b'\n', &self.buf[..self.pos])
-            .ok_or(ErrorKind::MissingNewline)?
-            + 1;
+        self.partial_entry_start =
+            memchr::memrchr(b'\n', &self.buf[..self.pos]).ok_or(Error::MissingNewline)? + 1;
         Ok(&mut self.buf[item_start..self.partial_entry_start])
     }
 }

@@ -7,7 +7,7 @@ use indexmap::map::Entry;
 use indexmap::IndexMap;
 use rayon::prelude::{IntoParallelRefIterator, ParallelIterator};
 
-use crate::errors::{Error, ErrorKind, Result, ResultExt};
+use crate::errors::{Error, Result};
 use crate::files::FileTree;
 use crate::hydra::Fetcher;
 use crate::nixpkgs;
@@ -48,6 +48,7 @@ impl<T> FileListingStream for T where T: Stream<Item = Result<Option<(StorePath,
 ///
 /// The `jobs` argument is used to specify how many requests should be done in parallel. No more than
 /// `jobs` requests will be in-flight at any given time.
+#[allow(clippy::result_large_err)]
 fn fetch_listings_impl(
     fetcher: &Fetcher,
     jobs: usize,
@@ -80,7 +81,7 @@ fn fetch_listings_impl(
     let process = move |mut handle: WorkSetHandle<_, _>, path: StorePath| async move {
         let Some(parsed) = fetcher
             .fetch_references(path.clone())
-            .map_err(|e| Error::with_chain(e, ErrorKind::FetchReferences(path)))
+            .map_err(|e| Error::FetchReferences { path, source: e })
             .await?
         else {
             return Ok(None);
@@ -95,7 +96,10 @@ fn fetch_listings_impl(
         let nar_path = parsed.nar_path;
 
         match fetcher.fetch_files(&parsed.store_path).await {
-            Err(e) => Err(Error::with_chain(e, ErrorKind::FetchFiles(path))),
+            Err(e) => Err(Error::FetchFiles {
+                path: parsed.store_path,
+                source: e,
+            }),
             Ok(Some(files)) => Ok(Some((path, nar_path, files))),
             Ok(None) => Ok(None),
         }
@@ -112,16 +116,18 @@ fn fetch_listings_impl(
 /// Tries to load the file listings for all paths from a cache file named `paths.cache`.
 ///
 /// This function is used to implement the `--path-cache` option.
+#[allow(clippy::result_large_err)]
 pub fn try_load_paths_cache() -> Result<Option<(impl FileListingStream, WorkSetWatch)>> {
     let file = match File::open("paths.cache") {
         Ok(file) => file,
         Err(ref e) if e.kind() == io::ErrorKind::NotFound => return Ok(None),
-        Err(e) => return Err(e).chain_err(|| ErrorKind::LoadPathsCache)?,
+        Err(e) => return Err(Error::LoadPathsCache { source: e })?,
     };
 
     let mut input = io::BufReader::new(file);
     let fetched: Vec<(StorePath, String, FileTree)> =
-        bincode::serde::decode_from_std_read(&mut input, bincode::config::standard()).chain_err(|| ErrorKind::LoadPathsCache)?;
+        bincode::serde::decode_from_std_read(&mut input, bincode::config::standard())
+            .map_err(|e| Error::ParsePathsCache { source: e })?;
     let workset = WorkSet::from_iter(
         fetched
             .into_iter()
@@ -136,6 +142,7 @@ pub fn try_load_paths_cache() -> Result<Option<(impl FileListingStream, WorkSetW
     Ok(Some((stream, watch)))
 }
 
+#[allow(clippy::result_large_err)]
 pub fn fetch<'a>(
     fetcher: &'a Fetcher,
     jobs: usize,
@@ -158,9 +165,9 @@ pub fn fetch<'a>(
         .par_iter()
         .flat_map_iter(|&(system, scope)| {
             nixpkgs::query_packages(nixpkgs, system, scope.as_deref(), show_trace)
-                .map(|x| x.chain_err(|| ErrorKind::QueryPackages))
         })
-        .collect::<Result<_>>()?;
+        .collect::<std::result::Result<_, nixpkgs::Error>>()
+        .map_err(|e| Error::QueryPackages { source: e })?;
 
     Ok(fetch_listings_impl(fetcher, jobs, all_paths))
 }

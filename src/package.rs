@@ -4,6 +4,7 @@
 //! some nix derivation. We also sometimes call a `StorePath` a package, to avoid
 //! confusion with file paths.
 use std::borrow::Cow;
+use std::fmt::Display;
 use std::io::{self, Write};
 use std::str;
 
@@ -276,5 +277,11 @@ impl StorePath {
     /// ```
     pub fn origin(&self) -> Cow<PathOrigin> {
         Cow::Borrowed(&self.origin)
+    }
+}
+
+impl Display for StorePath {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.as_str())
     }
 }
