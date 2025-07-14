@@ -10,7 +10,7 @@ use error_chain::ChainedError;
 use futures::{future, StreamExt};
 use nix_index::files::{FileNode, FileType};
 use nix_index::hydra::Fetcher;
-use nix_index::listings::fetch_listings;
+use nix_index::listings;
 use nix_index::{errors::*, CACHE_URL};
 use rusqlite::Connection;
 
@@ -57,7 +57,7 @@ async fn update_index(args: &Args) -> Result<()> {
 
     eprint!("+ querying available packages");
     let (files, watch) =
-        fetch_listings(&fetcher, args.jobs, &args.nixpkgs, systems, args.show_trace)?;
+        listings::fetch(&fetcher, args.jobs, &args.nixpkgs, systems, args.show_trace)?;
 
     // Treat request errors as if the file list were missing
     let files = files.map(|r| {

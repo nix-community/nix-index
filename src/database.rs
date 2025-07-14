@@ -13,9 +13,8 @@ use grep::matcher::{LineMatchKind, Match, Matcher, NoError};
 use memchr::{memchr, memrchr};
 use regex::bytes::Regex;
 use regex_syntax::ast::{
-    Alternation, Assertion, AssertionKind, Ast, Concat, Group, Literal, Repetition,
+    AssertionKind, Ast, Literal,
 };
-use regex_syntax::hir::{Hir, HirKind, Look};
 use serde_json;
 use zstd;
 
@@ -44,7 +43,7 @@ pub struct Writer {
 impl Drop for Writer {
     fn drop(&mut self) {
         if self.writer.is_some() {
-            self.finish_encoder().unwrap();
+            self.finish_encoder().expect("failed to flush database");
         }
     }
 }
@@ -80,7 +79,7 @@ impl Writer {
         }
         let writer = self.writer.as_mut().expect("not dropped yet");
         let mut encoder =
-            frcode::Encoder::new(writer, b"p".to_vec(), serde_json::to_vec(&path).unwrap());
+            frcode::Encoder::new(writer, b"p".to_vec(), serde_json::to_vec(&path).expect("failed to serialize path"));
         for entry in entries {
             entry.encode(&mut encoder)?;
         }
@@ -405,8 +404,8 @@ impl<'a, 'b> ReaderIter<'a, 'b> {
 
             // Tests if a store path matches the `package_name_pattern` and `package_hash` constraints.
             let should_search_package = |pkg: &StorePath| -> bool {
-                package_name_pattern.map_or(true, |r| r.is_match(pkg.name().as_bytes()))
-                    && package_hash.as_ref().map_or(true, |h| h == &pkg.hash())
+                package_name_pattern.is_none_or(|r| r.is_match(pkg.name().as_bytes()))
+                    && package_hash.as_ref().is_none_or(|h| h == &pkg.hash())
             };
 
             let mut pos = 0;

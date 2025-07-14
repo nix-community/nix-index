@@ -249,7 +249,7 @@ impl Fetcher {
     /// Fetches the file listing for the given store path.
     ///
     /// A file listing is a tree of the files that the given store path contains.
-    pub async fn fetch_files<'a>(&self, path: &StorePath) -> Result<Option<FileTree>> {
+    pub async fn fetch_files(&self, path: &StorePath) -> Result<Option<FileTree>> {
         let url_xz = format!("{}/{}.ls.xz", self.cache_url, path.hash());
         let url_generic = format!("{}/{}.ls", self.cache_url, path.hash());
         let name = format!("{}.json", path.hash());

@@ -67,7 +67,7 @@ fn locate(args: &Args) -> Result<()> {
         .run()
         .chain_err(|| ErrorKind::Grep(args.pattern.clone()))?
         .filter(|v| {
-            v.as_ref().ok().map_or(true, |v| {
+            v.as_ref().ok().map_or_else(|| true, |v| {
                 let &(ref store_path, FileTreeEntry { ref path, ref node }) = v;
                 let m = pattern
                     .find_iter(path)

@@ -374,7 +374,7 @@ impl<R: BufRead> Decoder<R> {
 
         // Since we don't want to return partially decoded items, we need to find the end of the last entry.
         self.partial_entry_start = memchr::memrchr(b'\n', &self.buf[..self.pos])
-            .ok_or_else(|| ErrorKind::MissingNewline)?
+            .ok_or(ErrorKind::MissingNewline)?
             + 1;
         Ok(&mut self.buf[item_start..self.partial_entry_start])
     }
@@ -457,7 +457,7 @@ impl<W: Write> Encoder<W> {
     /// in the frcode format.
     fn encode_diff(&mut self, diff: i16) -> io::Result<()> {
         let low = (diff & 0xFF) as u8;
-        if diff.abs() < i8::max_value() as i16 {
+        if diff.abs() < i8::MAX as i16 {
             self.writer.write_all(&[low])?;
         } else {
             let high = ((diff >> 8) & 0xFF) as u8;
@@ -503,10 +503,10 @@ impl<W: Write> Encoder<W> {
             "entry must not contain null bytes"
         );
         assert!(!path.contains(&b'\x00'), "entry must not contain newlines");
-        self.writer.write_all(&[b'\x00'])?;
+        self.writer.write_all(b"\x00")?;
 
         let mut shared: isize = 0;
-        let max_shared = i16::max_value() as isize;
+        let max_shared = i16::MAX as isize;
         for (a, b) in self.last.iter().zip(path.iter()) {
             if a != b || shared > max_shared {
                 break;

@@ -13,7 +13,7 @@ use nix_index::database::Writer;
 use nix_index::errors::*;
 use nix_index::files::FileTree;
 use nix_index::hydra::Fetcher;
-use nix_index::listings::{fetch_listings, try_load_paths_cache};
+use nix_index::listings::{self, try_load_paths_cache};
 use nix_index::package::StorePath;
 use nix_index::CACHE_URL;
 use separator::Separatable;
@@ -35,7 +35,7 @@ async fn update_index(args: &Args) -> Result<()> {
     let (files, watch) = match cached {
         Some((f, w)) => (Either::Left(f), w),
         None => {
-            let (f, w) = fetch_listings(
+            let (f, w) = listings::fetch(
                 &fetcher,
                 args.jobs,
                 &args.nixpkgs,

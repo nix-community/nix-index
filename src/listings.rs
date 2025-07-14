@@ -136,7 +136,7 @@ pub fn try_load_paths_cache() -> Result<Option<(impl FileListingStream, WorkSetW
     Ok(Some((stream, watch)))
 }
 
-pub fn fetch_listings<'a>(
+pub fn fetch<'a>(
     fetcher: &'a Fetcher,
     jobs: usize,
     nixpkgs: &str,
