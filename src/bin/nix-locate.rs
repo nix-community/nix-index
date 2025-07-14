@@ -8,27 +8,38 @@ use std::str;
 use std::str::FromStr;
 
 use clap::{value_parser, Parser};
-use error_chain::error_chain;
 use nix_index::database;
 use nix_index::files::{self, FileTreeEntry, FileType};
 use owo_colors::{OwoColorize, Stream};
 use regex::bytes::Regex;
 use separator::Separatable;
+use thiserror::Error;
 
-error_chain! {
-    errors {
-        ReadDatabase(database: PathBuf) {
-            description("database read error")
-            display("reading from the database at '{}' failed.\n\
+#[derive(Error, Debug)]
+pub enum Error {
+    #[error("reading from the database at '{database}' failed: {source}.\n\
                      This may be caused by a corrupt or missing database, try (re)running `nix-index` to generate the database. \n\
-                     If the error persists please file a bug report at https://github.com/nix-community/nix-index.", database.to_string_lossy())
-        }
-        Grep(pattern: String) {
-            description("grep builder error")
-            display("constructing the regular expression from the pattern '{}' failed.", pattern)
-        }
-    }
+                     If the error persists please file a bug report at https://github.com/nix-community/nix-index.")]
+    ReadDatabase {
+        database: PathBuf,
+        #[source]
+        source: database::Error,
+    },
+    #[error("constructing the regular expression from the pattern '{pattern}' failed: {source}")]
+    Grep {
+        pattern: String,
+        #[source]
+        source: regex::Error,
+    },
+    #[error("searching the database at '{database}' failed: {source}")]
+    SearchDatabase {
+        database: PathBuf,
+        #[source]
+        source: database::Error,
+    },
 }
+
+pub type Result<T> = std::result::Result<T, Error>;
 
 /// The struct holding the parsed arguments for searching
 struct Args {
@@ -48,46 +59,62 @@ struct Args {
 /// The main function of this module: searches with the given options in the database.
 fn locate(args: &Args) -> Result<()> {
     // Build the regular expression matcher
-    let pattern = Regex::new(&args.pattern).chain_err(|| ErrorKind::Grep(args.pattern.clone()))?;
+    let pattern = Regex::new(&args.pattern).map_err(|e| Error::Grep {
+        pattern: args.pattern.clone(),
+        source: e,
+    })?;
     let package_pattern = if let Some(ref pat) = args.package_pattern {
-        Some(Regex::new(pat).chain_err(|| ErrorKind::Grep(pat.clone()))?)
+        Some(Regex::new(pat).map_err(|e| Error::Grep {
+            pattern: pat.clone(),
+            source: e,
+        })?)
     } else {
         None
     };
 
     // Open the database
     let index_file = args.database.join("files");
-    let db = database::Reader::open(&index_file)
-        .chain_err(|| ErrorKind::ReadDatabase(index_file.clone()))?;
+    let db = database::Reader::open(&index_file).map_err(|e| Error::ReadDatabase {
+        database: index_file.clone(),
+        source: e,
+    })?;
 
     let results = db
         .query(&pattern)
         .package_pattern(package_pattern.as_ref())
         .hash(args.hash.clone())
         .run()
-        .chain_err(|| ErrorKind::Grep(args.pattern.clone()))?
+        .map_err(|e| Error::SearchDatabase {
+            database: index_file.clone(),
+            source: e,
+        })?
         .filter(|v| {
-            v.as_ref().ok().map_or(true, |v| {
-                let &(ref store_path, FileTreeEntry { ref path, ref node }) = v;
-                let m = pattern
-                    .find_iter(path)
-                    .last()
-                    .expect("path should match the pattern");
+            v.as_ref().ok().map_or_else(
+                || true,
+                |v| {
+                    let &(ref store_path, FileTreeEntry { ref path, ref node }) = v;
+                    let m = pattern
+                        .find_iter(path)
+                        .last()
+                        .expect("path should match the pattern");
 
-                let conditions = [
-                    !args.group || !path[m.end()..].contains(&b'/'),
-                    !args.only_toplevel || store_path.origin().toplevel,
-                    args.file_type.iter().any(|t| &node.get_type() == t),
-                ];
+                    let conditions = [
+                        !args.group || !path[m.end()..].contains(&b'/'),
+                        !args.only_toplevel || store_path.origin().toplevel,
+                        args.file_type.iter().any(|t| &node.get_type() == t),
+                    ];
 
-                conditions.iter().all(|c| *c)
-            })
+                    conditions.iter().all(|c| *c)
+                },
+            )
         });
 
     let mut printed_attrs = HashSet::new();
     for v in results {
-        let (store_path, FileTreeEntry { path, node }) =
-            v.chain_err(|| ErrorKind::ReadDatabase(index_file.clone()))?;
+        let (store_path, FileTreeEntry { path, node }) = v.map_err(|e| Error::ReadDatabase {
+            database: index_file.clone(),
+            source: e,
+        })?;
 
         use crate::files::FileNode::*;
         let (typ, size) = match node {
@@ -225,8 +252,8 @@ Limitations
 "#;
 
 fn cache_dir() -> &'static OsStr {
-    let base = xdg::BaseDirectories::with_prefix("nix-index").unwrap();
-    let cache_dir = Box::new(base.get_cache_home());
+    let base = xdg::BaseDirectories::with_prefix("nix-index");
+    let cache_dir = Box::new(base.get_cache_home().unwrap());
     let cache_dir = Box::leak(cache_dir);
     cache_dir.as_os_str()
 }
@@ -322,14 +349,6 @@ fn main() {
 
     if let Err(e) = locate(&args) {
         eprintln!("error: {}", e);
-
-        for e in e.iter().skip(1) {
-            eprintln!("caused by: {}", e);
-        }
-
-        if let Some(backtrace) = e.backtrace() {
-            eprintln!("backtrace: {:?}", backtrace);
-        }
         process::exit(2);
     }
 }

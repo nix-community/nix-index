@@ -7,15 +7,13 @@ use std::io::{self, BufReader, BufWriter, Read, Seek, Write};
 use std::path::Path;
 
 use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
-use error_chain::error_chain;
 use grep;
 use grep::matcher::{LineMatchKind, Match, Matcher, NoError};
 use memchr::{memchr, memrchr};
 use regex::bytes::Regex;
-use regex_syntax::ast::{
-    Alternation, Assertion, AssertionKind, Ast, Concat, Group, Literal, Repetition,
-};
+use regex_syntax::ast::{AssertionKind, Ast, Literal};
 use serde_json;
+use thiserror::Error;
 use zstd;
 
 use crate::files::{FileTree, FileTreeEntry};
@@ -43,7 +41,7 @@ pub struct Writer {
 impl Drop for Writer {
     fn drop(&mut self) {
         if self.writer.is_some() {
-            self.finish_encoder().unwrap();
+            self.finish_encoder().expect("failed to flush database");
         }
     }
 }
@@ -78,8 +76,11 @@ impl Writer {
             return Ok(());
         }
         let writer = self.writer.as_mut().expect("not dropped yet");
-        let mut encoder =
-            frcode::Encoder::new(writer, b"p".to_vec(), serde_json::to_vec(&path).unwrap());
+        let mut encoder = frcode::Encoder::new(
+            writer,
+            b"p".to_vec(),
+            serde_json::to_vec(&path).expect("failed to serialize path"),
+        );
         for entry in entries {
             entry.encode(&mut encoder)?;
         }
@@ -103,45 +104,27 @@ impl Writer {
     }
 }
 
-error_chain! {
-    errors {
-        UnsupportedFileType(found: Vec<u8>) {
-            description("unsupported file type")
-            display("expected file to start with nix-index file magic 'NIXI', but found '{}' (is this a valid nix-index database file?)", String::from_utf8_lossy(found))
-        }
-        UnsupportedVersion(found: u64) {
-            description("unsupported file version")
-            display("this executable only supports the nix-index database version {}, but found a database with version {}", FORMAT_VERSION, found)
-        }
-        MissingPackageEntry {
-            description("missing package entry for path")
-            display("database corrupt, found a file entry without a matching package entry")
-        }
-        Frcode(err: frcode::Error) {
-            description("frcode error")
-            display("database corrupt, frcode error: {}", err)
-        }
-        EntryParse(entry: Vec<u8>) {
-            description("entry parse failure")
-            display("database corrupt, could not parse entry: {:?}", String::from_utf8_lossy(entry))
-        }
-        StorePathParse(path: Vec<u8>) {
-            description("store path parse failure")
-            display("database corrupt, could not parse store path: {:?}", String::from_utf8_lossy(path))
-        }
-    }
-
-    foreign_links {
-        Io(io::Error);
-        Grep(grep::regex::Error);
-    }
+#[derive(Error, Debug)]
+pub enum Error {
+    #[error("expected file to start with nix-index file magic 'NIXI', but found '{found:?}' (is this a valid nix-index database file?)")]
+    UnsupportedFileType { found: Vec<u8> },
+    #[error("this executable only supports the nix-index database version {}, but found a database with version {found}", FORMAT_VERSION)]
+    UnsupportedVersion { found: u64 },
+    #[error("database corrupt, found a file entry without a matching package entry")]
+    MissingPackageEntry,
+    #[error("database corrupt, frcode error: {0}")]
+    Frcode(#[from] frcode::Error),
+    #[error("database corrupt, could not parse entry: {entry:?}")]
+    EntryParse { entry: Vec<u8> },
+    #[error("database corrupt, could not parse store path: {path:?}")]
+    StorePathParse { path: Vec<u8> },
+    #[error("I/O error: {0}")]
+    Io(#[from] io::Error),
+    #[error("grep error: {0}")]
+    Grep(#[from] grep::regex::Error),
 }
 
-impl From<frcode::Error> for Error {
-    fn from(err: frcode::Error) -> Error {
-        ErrorKind::Frcode(err).into()
-    }
-}
+type Result<T> = std::result::Result<T, Error>;
 
 /// A Reader allows fast querying of a nix-index database.
 pub struct Reader {
@@ -158,12 +141,14 @@ impl Reader {
         file.read_exact(&mut magic)?;
 
         if magic != FILE_MAGIC {
-            return Err(ErrorKind::UnsupportedFileType(magic.to_vec()).into());
+            return Err(Error::UnsupportedFileType {
+                found: magic.to_vec(),
+            });
         }
 
         let version = file.read_u64::<LittleEndian>()?;
         if version != FORMAT_VERSION {
-            return Err(ErrorKind::UnsupportedVersion(version).into());
+            return Err(Error::UnsupportedVersion { found: version });
         }
 
         let decoder = zstd::Decoder::new(file)?;
@@ -242,21 +227,18 @@ impl<'a, 'b> Query<'a, 'b> {
         {
             let mut stack = vec![&mut expr];
             while let Some(e) = stack.pop() {
-                match *e {
-                    Ast::Assertion(Assertion {
-                        kind: AssertionKind::StartLine,
-                        span,
-                    }) => {
-                        *e = Ast::Literal(Literal {
-                            span,
+                match e {
+                    Ast::Assertion(a) if a.kind == AssertionKind::StartLine => {
+                        *e = Ast::Literal(Box::new(Literal {
+                            span: a.span,
                             c: '\0',
                             kind: regex_syntax::ast::LiteralKind::Verbatim,
-                        })
+                        }))
                     }
-                    Ast::Group(Group { ref mut ast, .. }) => stack.push(ast),
-                    Ast::Repetition(Repetition { ref mut ast, .. }) => stack.push(ast),
-                    Ast::Concat(Concat { ref mut asts, .. })
-                    | Ast::Alternation(Alternation { ref mut asts, .. }) => stack.extend(asts),
+                    Ast::Group(g) => stack.push(&mut g.ast),
+                    Ast::Repetition(r) => stack.push(&mut r.ast),
+                    Ast::Concat(c) => stack.extend(c.asts.iter_mut()),
+                    Ast::Alternation(a) => stack.extend(a.asts.iter_mut()),
                     _ => {}
                 }
             }
@@ -399,16 +381,18 @@ impl<'a, 'b> ReaderIter<'a, 'b> {
                 };
 
                 let json = &block[mat.start() + 2..mat.end() - 1];
-                let pkg: StorePath = serde_json::from_slice(json)
-                    .chain_err(|| ErrorKind::StorePathParse(json.to_vec()))?;
+                let pkg: StorePath =
+                    serde_json::from_slice(json).map_err(|_| Error::StorePathParse {
+                        path: json.to_vec(),
+                    })?;
                 cached_package = Some((pkg.clone(), mat.end()));
                 Ok(Some((pkg, mat.end())))
             };
 
             // Tests if a store path matches the `package_name_pattern` and `package_hash` constraints.
             let should_search_package = |pkg: &StorePath| -> bool {
-                package_name_pattern.map_or(true, |r| r.is_match(pkg.name().as_bytes()))
-                    && package_hash.as_ref().map_or(true, |h| h == &pkg.hash())
+                package_name_pattern.is_none_or(|r| r.is_match(pkg.name().as_bytes()))
+                    && package_hash.as_ref().is_none_or(|h| h == &pkg.hash())
             };
 
             let mut pos = 0;
@@ -451,8 +435,9 @@ impl<'a, 'b> ReaderIter<'a, 'b> {
                     }
                 }
 
-                let entry = FileTreeEntry::decode(entry)
-                    .ok_or_else(|| Error::from(ErrorKind::EntryParse(entry.to_vec())))?;
+                let entry = FileTreeEntry::decode(entry).ok_or_else(|| Error::EntryParse {
+                    entry: entry.to_vec(),
+                })?;
 
                 // check for false positives
                 if !self.exact_pattern.is_match(&entry.path) {

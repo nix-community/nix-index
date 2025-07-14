@@ -6,14 +6,13 @@ use std::path::PathBuf;
 use std::process;
 
 use clap::Parser;
-use error_chain::ChainedError;
 use futures::future::Either;
 use futures::{future, StreamExt};
 use nix_index::database::Writer;
 use nix_index::errors::*;
 use nix_index::files::FileTree;
 use nix_index::hydra::Fetcher;
-use nix_index::listings::{fetch_listings, try_load_paths_cache};
+use nix_index::listings::{self, try_load_paths_cache};
 use nix_index::package::StorePath;
 use nix_index::CACHE_URL;
 use separator::Separatable;
@@ -31,11 +30,11 @@ async fn update_index(args: &Args) -> Result<()> {
     };
 
     eprintln!("+ querying available packages");
-    let fetcher = Fetcher::new(CACHE_URL.to_string()).map_err(ErrorKind::ParseProxy)?;
+    let fetcher = Fetcher::new(CACHE_URL.to_string()).map_err(Error::ParseProxy)?;
     let (files, watch) = match cached {
         Some((f, w)) => (Either::Left(f), w),
         None => {
-            let (f, w) = fetch_listings(
+            let (f, w) = listings::fetch(
                 &fetcher,
                 args.jobs,
                 &args.nixpkgs,
@@ -49,7 +48,7 @@ async fn update_index(args: &Args) -> Result<()> {
     // Treat request errors as if the file list were missing
     let files = files.map(|r| {
         r.unwrap_or_else(|e| {
-            eprint!("\n{}", e.display_chain());
+            eprint!("\n{:?}", e);
             None
         })
     });
@@ -76,10 +75,17 @@ async fn update_index(args: &Args) -> Result<()> {
         eprint!(" (filtering by `{}`)", args.filter_prefix);
     }
     eprint!("\r");
-    fs::create_dir_all(&args.database)
-        .chain_err(|| ErrorKind::CreateDatabaseDir(args.database.clone()))?;
-    let mut db = Writer::create(args.database.join("files"), args.compression_level)
-        .chain_err(|| ErrorKind::CreateDatabase(args.database.clone()))?;
+    fs::create_dir_all(&args.database).map_err(|e| Error::CreateDatabaseDir {
+        path: args.database.clone(),
+        source: e,
+    })?;
+    let mut db =
+        Writer::create(args.database.join("files"), args.compression_level).map_err(|e| {
+            Error::CreateDatabase {
+                path: args.database.clone(),
+                source: Box::new(e),
+            }
+        })?;
 
     let mut results: Vec<(StorePath, String, FileTree)> = Vec::new();
     while let Some(entry) = files.next().await {
@@ -88,29 +94,38 @@ async fn update_index(args: &Args) -> Result<()> {
         }
         let (path, _, files) = entry;
         db.add(path, files, args.filter_prefix.as_bytes())
-            .chain_err(|| ErrorKind::WriteDatabase(args.database.clone()))?;
+            .map_err(|e| Error::WriteDatabase {
+                path: args.database.clone(),
+                source: e,
+            })?;
     }
     eprintln!();
 
     if args.path_cache {
         eprintln!("+ writing path cache");
-        let mut output = io::BufWriter::new(
-            File::create("paths.cache").chain_err(|| ErrorKind::WritePathsCache)?,
-        );
-        bincode::serialize_into(&mut output, &results).chain_err(|| ErrorKind::WritePathsCache)?;
+        let mut output = io::BufWriter::new(File::create("paths.cache").map_err(|e| {
+            Error::WritePathsCache {
+                source: Box::new(e),
+            }
+        })?);
+        bincode::serde::encode_into_std_write(&results, &mut output, bincode::config::standard())
+            .map_err(|e| Error::WritePathsCache {
+            source: Box::new(e),
+        })?;
     }
 
-    let index_size = db
-        .finish()
-        .chain_err(|| ErrorKind::WriteDatabase(args.database.clone()))?;
+    let index_size = db.finish().map_err(|e| Error::WriteDatabase {
+        path: args.database.clone(),
+        source: e,
+    })?;
     eprintln!("+ wrote index of {} bytes", index_size.separated_string());
 
     Ok(())
 }
 
 fn cache_dir() -> &'static OsStr {
-    let base = xdg::BaseDirectories::with_prefix("nix-index").unwrap();
-    let cache_dir = Box::new(base.get_cache_home());
+    let base = xdg::BaseDirectories::with_prefix("nix-index");
+    let cache_dir = Box::new(base.get_cache_home().unwrap());
     let cache_dir = Box::leak(cache_dir);
     cache_dir.as_os_str()
 }
@@ -160,15 +175,7 @@ async fn main() {
     let args = Args::parse();
 
     if let Err(e) = update_index(&args).await {
-        eprintln!("error: {}", e);
-
-        for e in e.iter().skip(1) {
-            eprintln!("caused by: {}", e);
-        }
-
-        if let Some(backtrace) = e.backtrace() {
-            eprintln!("backtrace: {:?}", backtrace);
-        }
+        eprintln!("error: {:?}", e);
         process::exit(2);
     }
 }
