@@ -1,9 +1,23 @@
-## 0.1.9 - [Unreleased]
+## 0.1.10 [Unreleased]
 ### Added
 ### Fixed
 ### Changed
 
-* `--top-level` is now the default. To use the old default, add `--all`.
+## 0.1.9
+### Added
+
+* `texlive.pkgs` is added to the `EXTRA_SCOPES`, i.e. Texlive packages can be searched now. (#254)
+* Support for command-not-found for Nushell has been added. (#271)
+
+### Fixed
+
+* Packages with no files in the index are now excluded, this significantly reduces the index size (~4MB → 1MB) (#266)
+* debuginfo processing now skips symlinks which were contained inside of `$debug/lib/debug`. (#278)
+
+### Changed
+
+* `--top-level` is now the default. To use the old default, add `--all`. (#243)
+* Chore updates of the Flake lock, dependencies, clippy and a move to `thiserror` rather than `error_chain`. (#279)
 
 ## 0.1.8
 ### Added
