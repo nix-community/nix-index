@@ -23,13 +23,14 @@ use crate::workset::{WorkSet, WorkSetHandle, WorkSetWatch};
 //
 // We only need sets that are not marked "recurseIntoAttrs" here, since if they are,
 // they are already part of normal_paths.
-pub const EXTRA_SCOPES: [&str; 6] = [
+pub const EXTRA_SCOPES: [&str; 7] = [
     "xorg",
     "haskellPackages",
     "rPackages",
     "nodePackages",
     "coqPackages",
     "texlive.pkgs",
+    "darwin",
 ];
 
 /// A stream of store paths (packages) with their associated file listings.
