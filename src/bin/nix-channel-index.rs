@@ -175,7 +175,7 @@ async fn update_index(args: &Args) -> Result<()> {
 }
 
 #[derive(Debug, Parser)]
-#[clap(author, about, version)]
+#[clap(author, about, version, name = "nix-channel-index")]
 struct Args {
     /// Make REQUESTS http requests in parallel
     #[clap(short = 'r', long = "requests", default_value = "500")]
@@ -200,11 +200,27 @@ struct Args {
     /// Show a stack trace in the case of a Nix evaluation error
     #[clap(long)]
     show_trace: bool,
+
+    /// Generate man page, then exit.
+    #[clap(long, hide = true)]
+    mangen: bool,
 }
 
 #[tokio::main]
 async fn main() {
     let args = Args::parse();
+
+    if args.mangen {
+        use clap::CommandFactory;
+        let man = clap_mangen::Man::new(Args::command());
+
+        if let Err(err) = man.render(&mut std::io::stdout()) {
+            eprintln!("error: {}", err);
+            process::exit(2)
+        } else {
+            return;
+        }
+    }
 
     if let Err(e) = update_index(&args).await {
         eprintln!("error: {:?}", e);
