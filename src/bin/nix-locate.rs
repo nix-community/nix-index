@@ -180,7 +180,7 @@ fn locate(args: &Args) -> Result<()> {
 ///
 /// Handles parsing the values of more complex arguments.
 fn process_args(matches: Opts) -> result::Result<Args, clap::Error> {
-    let pattern_arg = matches.pattern;
+    let pattern_arg = matches.pattern.unwrap();
     let package_arg = matches.package;
 
     let start_anchor = if matches.at_root { "^" } else { "" };
@@ -260,11 +260,11 @@ fn cache_dir() -> &'static OsStr {
 
 /// Quickly finds the derivation providing a certain file
 #[derive(Debug, Parser)]
-#[clap(author, about, version, after_help = LONG_USAGE)]
+#[clap(author, about, version, after_help = LONG_USAGE, name = "nix-locate")]
 struct Opts {
     /// Pattern for which to search
-    // #[clap(name = "PATTERN")]
-    pattern: String,
+    #[clap(required_unless_present = "mangen", name = "PATTERN")]
+    pattern: Option<String>,
 
     /// Directory where the index is stored
     #[clap(short, long = "db", default_value_os = cache_dir(), env = "NIX_INDEX_DATABASE")]
@@ -320,6 +320,10 @@ struct Opts {
     /// store path are omitted. This is useful for scripts that use the output of nix-locate.
     #[clap(long)]
     minimal: bool,
+
+    /// Generate the man page, then exit
+    #[clap(long, hide = true)]
+    mangen: bool,
 }
 
 #[derive(clap::ValueEnum, Clone, Copy, Debug)]
@@ -344,6 +348,18 @@ impl FromStr for Color {
 
 fn main() {
     let args = Opts::parse();
+
+    if args.mangen {
+        use clap::CommandFactory;
+        let man = clap_mangen::Man::new(Opts::command());
+
+        if let Err(e) = man.render(&mut std::io::stdout()) {
+            eprintln!("error: {}", e);
+            process::exit(2)
+        } else {
+            return;
+        }
+    }
 
     let args = process_args(args).unwrap_or_else(|e| e.exit());
 
