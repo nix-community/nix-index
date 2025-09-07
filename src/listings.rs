@@ -78,7 +78,7 @@ fn fetch_listings_impl(
 
     // Processes a single store path, fetching the file listing for it and
     // adding its references to the queue
-    let process = move |mut handle: WorkSetHandle<_, _>, path: StorePath| async move {
+    let process = move |_handle: WorkSetHandle<_, _>, path: StorePath| async move {
         let Some(parsed) = fetcher
             .fetch_references(path.clone())
             .map_err(|e| Error::FetchReferences { path, source: e })
@@ -87,10 +87,12 @@ fn fetch_listings_impl(
             return Ok(None);
         };
 
-        for reference in parsed.references {
-            let hash = reference.hash().into_owned();
-            handle.add_work(hash, reference);
-        }
+        // Exclude non-toplevel packages as they are not reachable as nixpkgs attrs
+        // and result in non-deterninism in the produced index.
+        // for reference in parsed.references {
+        //     let hash = reference.hash().into_owned();
+        //     handle.add_work(hash, reference);
+        // }
 
         let path = parsed.store_path.clone();
         let nar_path = parsed.nar_path;
