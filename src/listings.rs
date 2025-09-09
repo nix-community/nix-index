@@ -166,10 +166,23 @@ pub fn fetch<'a>(
     let all_paths = all_queries
         .par_iter()
         .flat_map_iter(|&(system, scope)| {
-            nixpkgs::query_packages(nixpkgs, system, scope.as_deref(), show_trace)
+            nixpkgs::query_packages(nixpkgs, system, scope.as_deref(), show_trace).map(|x| {
+                x.map_err(|e| Error::QueryPackages {
+                    package_set: scope.as_deref().map(|s| s.to_string()),
+                    source: e,
+                })
+            })
         })
-        .collect::<std::result::Result<_, nixpkgs::Error>>()
-        .map_err(|e| Error::QueryPackages { source: e })?;
+        .filter_map(|res| match res {
+            Ok(path) => Some(path),
+            Err(e) => {
+                // Older versions of nixpkgs may not have all scopes, so we skip them instead
+                // of completely bailing out.
+                eprintln!("Error getting package set: {e}");
+                None
+            }
+        })
+        .collect::<Vec<_>>();
 
     Ok(fetch_listings_impl(fetcher, jobs, all_paths))
 }
