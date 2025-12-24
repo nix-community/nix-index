@@ -14,7 +14,6 @@ use nix_index::files::FileTree;
 use nix_index::hydra::Fetcher;
 use nix_index::listings::{self, try_load_paths_cache};
 use nix_index::package::StorePath;
-use nix_index::CACHE_URL;
 use separator::Separatable;
 
 /// The main function of this module: creates a new nix-index database.
@@ -30,7 +29,7 @@ async fn update_index(args: &Args) -> Result<()> {
     };
 
     eprintln!("+ querying available packages");
-    let fetcher = Fetcher::new(CACHE_URL.to_string()).map_err(Error::ParseProxy)?;
+    let fetcher = Fetcher::new(args.substituter.to_string()).map_err(Error::ParseProxy)?;
     let (files, watch) = match cached {
         Some((f, w)) => (Either::Left(f), w),
         None => {
@@ -149,6 +148,10 @@ struct Args {
     /// Specify system platform for which to build the index, accepted by nix-env --argstr system
     #[clap(short = 's', long, value_name = "platform")]
     system: Option<String>,
+
+    /// The substituter (binary cache) URL to query
+    #[clap(long, default_value = "https://cache.nixos.org")]
+    substituter: String,
 
     /// Zstandard compression level
     #[clap(short, long = "compression", default_value = "22")]
