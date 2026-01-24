@@ -497,7 +497,7 @@ impl<W: Write> Encoder<W> {
             !path.contains(&b'\x00'),
             "entry must not contain null bytes"
         );
-        assert!(!path.contains(&b'\x00'), "entry must not contain newlines");
+        assert!(!path.contains(&b'\n'), "entry must not contain newlines");
         self.writer.write_all(b"\x00")?;
 
         let mut shared: isize = 0;
