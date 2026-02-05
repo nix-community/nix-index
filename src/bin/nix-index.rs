@@ -28,6 +28,7 @@ async fn update_index(args: &Args) -> Result<()> {
     } else {
         None
     };
+    let using_cache = cached.is_some();
 
     eprintln!("+ querying available packages");
     let fetcher = Fetcher::new(CACHE_URL.to_string()).map_err(Error::ParseProxy)?;
@@ -101,7 +102,7 @@ async fn update_index(args: &Args) -> Result<()> {
     }
     eprintln!();
 
-    if args.path_cache {
+    if args.path_cache && !using_cache {
         eprintln!("+ writing path cache");
         let mut output = io::BufWriter::new(File::create("paths.cache").map_err(|e| {
             Error::WritePathsCache {
