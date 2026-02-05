@@ -33,6 +33,7 @@
             lockFile = ./Cargo.lock;
           };
 
+          nativeBuildInputs = [ installShellFiles ];
           buildInputs = [ sqlite ];
 
           postInstall = ''
@@ -42,6 +43,12 @@
             substituteInPlace command-not-found.nu \
               --subst-var out
             install -Dm555 command-not-found.nu -t $out/etc/profile.d
+
+            "$out/bin/nix-locate" --mangen > nix-locate.1
+            "$out/bin/nix-index" --mangen > nix-index.1
+            "$out/bin/nix-channel-index" --mangen > nix-channel-index.1
+
+            installManPage nix-locate.1 nix-index.1 nix-channel-index.1
           '';
 
           meta = with lib; {
