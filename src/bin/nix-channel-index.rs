@@ -7,15 +7,15 @@ use std::process;
 
 use clap::Parser;
 use futures::{future, StreamExt};
+use nix_index::errors::*;
 use nix_index::files::{FileNode, FileType};
 use nix_index::hydra::Fetcher;
 use nix_index::listings;
-use nix_index::{errors::*, CACHE_URL};
 use rusqlite::Connection;
 
 /// The main function of this module: creates a new command-not-found database.
 async fn update_index(args: &Args) -> Result<()> {
-    let fetcher = Fetcher::new(CACHE_URL.to_string()).map_err(Error::ParseProxy)?;
+    let fetcher = Fetcher::new(args.substituter.to_string()).map_err(Error::ParseProxy)?;
     let connection = Connection::open_in_memory().map_err(|e| Error::CreateDatabase {
         path: args.output.clone(),
         source: Box::new(e),
@@ -196,6 +196,10 @@ struct Args {
     /// Systems to include in generated database
     #[clap(short = 's', long = "platform")]
     systems: Option<Vec<String>>,
+
+    /// The substituter (binary cache) URL to query
+    #[clap(long, default_value = "https://cache.nixos.org")]
+    substituter: String,
 
     /// Show a stack trace in the case of a Nix evaluation error
     #[clap(long)]
