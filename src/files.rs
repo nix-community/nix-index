@@ -195,6 +195,25 @@ pub struct FileTreeEntry {
 }
 
 impl FileTreeEntry {
+    /// Check if this entry contains bytes that are invalid for the frcode format.
+    /// The frcode format uses the `NUL` byte as a metadata/path separator and newlines as entry delimiters,
+    /// so entries containing these bytes cannot be encoded.
+    pub fn has_invalid_bytes(&self) -> bool {
+        let has_invalid = |bytes: &[u8]| bytes.contains(&b'\x00') || bytes.contains(&b'\n');
+
+        if has_invalid(&self.path) {
+            return true;
+        }
+
+        if let FileNode::Symlink { ref target } = self.node {
+            if has_invalid(target) {
+                return true;
+            }
+        }
+
+        false
+    }
+
     pub fn encode<W: Write>(self, encoder: &mut frcode::Encoder<W>) -> io::Result<()> {
         self.node.encode(encoder)?;
         encoder.write_path(self.path)?;
