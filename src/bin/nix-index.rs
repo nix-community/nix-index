@@ -132,7 +132,7 @@ fn cache_dir() -> &'static OsStr {
 
 /// Builds an index for nix-locate
 #[derive(Debug, Parser)]
-#[clap(author, about, version)]
+#[clap(author, about, version, name = "nix-index")]
 struct Args {
     /// Make REQUESTS http requests in parallel
     #[clap(short = 'r', long = "requests", default_value = "100")]
@@ -168,11 +168,27 @@ struct Args {
     /// Note: does not check if the cached data is up to date! Use only for development.
     #[clap(long)]
     path_cache: bool,
+
+    /// Generate man page, then exit
+    #[clap(long, hide = true)]
+    mangen: bool,
 }
 
 #[tokio::main]
 async fn main() {
     let args = Args::parse();
+
+    if args.mangen {
+        use clap::CommandFactory;
+        let man = clap_mangen::Man::new(Args::command());
+
+        if let Err(err) = man.render(&mut std::io::stdout()) {
+            eprintln!("error: {}", err);
+            process::exit(2)
+        } else {
+            return;
+        }
+    }
 
     if let Err(e) = update_index(&args).await {
         eprintln!("error: {:?}", e);
