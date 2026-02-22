@@ -24,6 +24,9 @@ command_not_found_handle () {
             >&2 echo "$cmd: command not found"
             ;;
         1)
+            >&2 cat <<EOF
+The program '$cmd' is currently not installed.
+EOF
             # if only 1 package provides this, then we can invoke it
             # without asking the users if they have opted in with one
             # of 2 environment variables
@@ -40,8 +43,7 @@ command_not_found_handle () {
 
             if ! [ -z "${NIX_AUTO_INSTALL-}" ]; then
                 >&2 cat <<EOF
-The program '$cmd' is currently not installed. It is provided by
-the package '$toplevel.$attrs', which I will now install for you.
+It is provided by the package '$toplevel.${attrs%.out}', which I will now install for you.
 EOF
                 if [ -e "$HOME/.nix-profile/manifest.json" ]; then
                     nix profile install $toplevel#$attrs
@@ -71,55 +73,82 @@ $cmd: command not found
 EOF
                 fi
             else
+                # The Correct Way of checking we're running Home Manager
+                if [ -n "$__HM_SESS_VARS_SOURCED" ]; then
+                    >&2 cat <<EOF
+Install it for the current user '$USER' by adding to your Home Manager configuration:
+  home.packages = with pkgs; [ ${attrs%.out} ];
+
+EOF
+                fi
+                # The Correct Way of checking we're running NixOS
+                if [ -e "/etc/NIXOS" ]; then
+                    >&2 cat <<EOF
+Install it for all users by adding to your NixOS configuration:
+  environment.systemPackages = with pkgs; [ ${attrs%.out} ];
+
+EOF
+                fi
                 if [ -e "$HOME/.nix-profile/manifest.json" ]; then
                     >&2 cat <<EOF
-The program '$cmd' is currently not installed. You can install it
-by typing:
-  nix profile install $toplevel#$attrs
+You can run it once with:
+  nix shell $toplevel#${attrs%.out} -c $cmd
 
-Or run it once with:
-  nix shell $toplevel#$attrs -c $cmd ...
+Or install it by typing:
+  nix profile install $toplevel#${attrs%.out}
 EOF
                 else
                     >&2 cat <<EOF
-The program '$cmd' is currently not installed. You can install it
-by typing:
-  nix-env -iA $toplevel.$attrs
-
-Or run it once with:
-  nix-shell -p $attrs --run '$cmd ...'
+You can run it once with:
+  nix-shell -p ${attrs%.out} --run '$cmd'
 EOF
                 fi
             fi
             ;;
         *)
             >&2 cat <<EOF
-The program '$cmd' is currently not installed. It is provided by
-several packages. You can install it by typing one of the following:
+The program '$cmd' is currently not installed. It is provided by several packages.
 EOF
 
-            # ensure we get each element of attrs
-            # in a cross platform way
-            while read attr; do
-                if [ -e "$HOME/.nix-profile/manifest.json" ]; then
-                    >&2 echo "  nix profile install $toplevel#$attr"
-                else
-                    >&2 echo "  nix-env -iA $toplevel.$attr"
-                fi
-            done <<< "$attrs"
-
+            # ensure we get each element of attrs in a cross platform way
+            if [ -n "$__HM_SESS_VARS_SOURCED" ]; then
+                >&2 cat <<EOF
+Install it for the current user '$USER' by adding to your Home Manager configuration one of:
+EOF
+                while read attr; do
+                    >&2 echo "  home.packages = with pkgs; [ ${attr%.out} ];"
+                done <<< "$attrs"
+                echo \n
+            fi
+            if [ -e "/etc/NIXOS" ]; then
+                >&2 cat <<EOF
+Install it for all users by adding to your NixOS configuration one of:
+EOF
+                while read attr; do
+                    >&2 echo "  environment.systemPackages = with pkgs; [ ${attr%.out} ];"
+                done <<< "$attrs"
+                echo \n
+            fi
             >&2 cat <<EOF
-
-Or run it once with:
+You can run it once with one of:
 EOF
-
             while read attr; do
                 if [ -e "$HOME/.nix-profile/manifest.json" ]; then
-                    >&2 echo "  nix shell $toplevel#$attr -c $cmd ..."
+                    >&2 echo "  nix shell $toplevel#${attr%.out} -c $cmd"
                 else
-                    >&2 echo "  nix-shell -p $attr --run '$cmd ...'"
+                    >&2 echo "  nix-shell -p ${attr%.out} --run '$cmd'"
                 fi
             done <<< "$attrs"
+            if [ -e "$HOME/.nix-profile/manifest.json" ]; then
+                >&2 cat <<EOF
+
+Or install it by typing one of:
+EOF
+                while read attr; do
+                    >&2 echo "  nix profile install $toplevel#${attr%.out}"
+                done <<< "$attrs"
+                echo "\n"
+            fi
             ;;
     esac
 
