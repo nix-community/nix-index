@@ -1,8 +1,10 @@
-# nix-index
-## A files database for nixpkgs
-**nix-index** is a tool to quickly locate the package providing a certain file in [`nixpkgs`](https://github.com/NixOS/nixpkgs). It indexes built derivations found in binary caches. 
+# `nix-index` – a file database for Nixpkgs
 
-###### Demo
+`nix-index` is a tool to quickly locate the package providing a certain file in [`nixpkgs`](https://github.com/NixOS/nixpkgs). It indexes built derivations found in binary caches. 
+
+It is used to [build the file index](https://github.com/NixOS/nixos-channel-scripts/pull/62) for official channel releases on <channels.nixos.org> and thus provides the basis for <search.nixos.org>.
+
+## Demo
 
 ```
 $ nix-locate 'bin/hello'
