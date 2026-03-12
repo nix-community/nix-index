@@ -60,7 +60,7 @@ features = ["derive", "env"]
 
 [dependencies.rusqlite]
 features = ["backup"]
-version = "0.37.0"
+version = "0.38.0"
 
 [[example]]
 name = "nix-index-debug"
