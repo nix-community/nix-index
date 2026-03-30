@@ -65,8 +65,14 @@ async fn update_index(args: &Args) -> Result<()> {
     };
 
     eprint!("+ querying available packages");
-    let (files, watch) =
-        listings::fetch(&fetcher, args.jobs, &args.nixpkgs, systems, args.show_trace)?;
+    let (files, watch) = listings::fetch(
+        &fetcher,
+        args.jobs,
+        &args.nixpkgs,
+        systems,
+        &args.extra_scopes,
+        args.show_trace,
+    )?;
 
     // Treat request errors as if the file list were missing
     let files = files.map(|r| {
@@ -200,6 +206,18 @@ struct Args {
     /// Show a stack trace in the case of a Nix evaluation error
     #[clap(long)]
     show_trace: bool,
+
+    // We also add some additional sets that only show up in `nix-env -qa -A someSet`.
+    //
+    // Some of these sets are not build directly by hydra. We still include them here
+    // since parts of these sets may be build as dependencies of other packages
+    // that are build by hydra. This way, our attribute path information is more
+    // accurate.
+    //
+    // We only need sets that are not marked "recurseIntoAttrs" here, since if they are,
+    // they are already part of normal_paths.
+    #[clap(long, default_values = ["haskellPackages", "rPackages", "coqPackages", "texlive.pkgs"])]
+    extra_scopes: Vec<String>,
 }
 
 #[tokio::main]
