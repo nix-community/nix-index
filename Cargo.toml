@@ -49,6 +49,7 @@ xdg = "3.0.0"
 xml-rs = "0.8.20"
 xz2 = "0.1.7"
 zstd = { version = "0.13.3", features = [ "zstdmt" ] }
+clap_mangen = "0.2.28"
 
 [dependencies.tokio]
 features = ["full"]
