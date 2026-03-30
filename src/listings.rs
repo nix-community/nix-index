@@ -23,10 +23,9 @@ use crate::workset::{WorkSet, WorkSetHandle, WorkSetWatch};
 //
 // We only need sets that are not marked "recurseIntoAttrs" here, since if they are,
 // they are already part of normal_paths.
-pub const EXTRA_SCOPES: [&str; 5] = [
+pub const EXTRA_SCOPES: [&str; 4] = [
     "haskellPackages",
     "rPackages",
-    "nodePackages",
     "coqPackages",
     "texlive.pkgs",
 ];
