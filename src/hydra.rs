@@ -129,7 +129,7 @@ impl Fetcher {
     ///
     /// This function will automatically retry the request a few times to mitigate intermittent network
     /// failures.
-    fn fetch(&self, url: String) -> BoxFuture<(String, Option<Vec<u8>>)> {
+    fn fetch(&self, url: String) -> BoxFuture<'_, (String, Option<Vec<u8>>)> {
         let strategy = ExponentialBackoff::from_millis(50)
             .max_delay(Duration::from_millis(5000))
             .take(20)
@@ -181,7 +181,7 @@ impl Fetcher {
     ///
     /// The references will be `None` if no information about the store path could be found
     /// (happens if the narinfo wasn't found which means that hydra didn't build this path).
-    pub fn fetch_references(&self, mut path: StorePath) -> BoxFuture<Option<ParsedNAR>> {
+    pub fn fetch_references(&self, mut path: StorePath) -> BoxFuture<'_, Option<ParsedNAR>> {
         let url = format!("{}/{}.narinfo", self.cache_url, path.hash());
 
         let parse_response = move |(url, data)| {

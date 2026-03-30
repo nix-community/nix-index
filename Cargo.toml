@@ -29,7 +29,7 @@ name = "nix-locate"
 bincode = { version = "2.0.1", features = ["serde"] }
 byteorder = "1.5.0"
 futures = "0.3.30"
-grep = "0.3.1"
+grep = "0.4.1"
 atty = "0.2.14"
 memchr = "2.7.2"
 num_cpus = "1.16.0"
@@ -38,7 +38,7 @@ owo-colors = { version = "4.0.0", features = ["supports-colors"] }
 rayon = "1.10.0"
 regex = "1.10.4"
 regex-syntax = "0.8.5"
-reqwest = { version = "0.12.3", default-features = false, features = [ "brotli", "http2", "rustls-tls-native-roots" ] }
+reqwest = { version = "0.13.2", default-features = false, features = [ "brotli", "http2" ] }
 separator = "0.4.1"
 serde = { version = "1.0.198", features = [ "derive" ] }
 serde_bytes = "0.11.14"
@@ -46,7 +46,7 @@ serde_json = "1.0.116"
 thiserror = "2.0.12"
 tokio-retry = "0.3.0"
 xdg = "3.0.0"
-xml-rs = "0.8.20"
+xml-rs = "1.0.0"
 xz2 = "0.1.7"
 zstd = { version = "0.13.3", features = [ "zstdmt" ] }
 
@@ -60,7 +60,7 @@ features = ["derive", "env"]
 
 [dependencies.rusqlite]
 features = ["backup"]
-version = "0.37.0"
+version = "0.39.0"
 
 [[example]]
 name = "nix-index-debug"
