@@ -14,22 +14,6 @@ use crate::nixpkgs;
 use crate::package::StorePath;
 use crate::workset::{WorkSet, WorkSetHandle, WorkSetWatch};
 
-// We also add some additional sets that only show up in `nix-env -qa -A someSet`.
-//
-// Some of these sets are not build directly by hydra. We still include them here
-// since parts of these sets may be build as dependencies of other packages
-// that are build by hydra. This way, our attribute path information is more
-// accurate.
-//
-// We only need sets that are not marked "recurseIntoAttrs" here, since if they are,
-// they are already part of normal_paths.
-pub const EXTRA_SCOPES: [&str; 4] = [
-    "haskellPackages",
-    "rPackages",
-    "coqPackages",
-    "texlive.pkgs",
-];
-
 /// A stream of store paths (packages) with their associated file listings.
 ///
 /// If a store path has no file listing (for example, because it is not built by hydra),
@@ -146,10 +130,18 @@ pub fn fetch<'a>(
     jobs: usize,
     nixpkgs: &str,
     systems: Vec<Option<&str>>,
+    extra_scopes: &[String],
     show_trace: bool,
 ) -> Result<(impl FileListingStream + 'a, WorkSetWatch)> {
     let mut scopes = vec![None];
-    scopes.extend(EXTRA_SCOPES.map(Some));
+    scopes.extend(
+        extra_scopes
+            .iter()
+            // allow --extra-scopes ""
+            .filter(|x| !x.is_empty())
+            .cloned()
+            .map(Some),
+    );
 
     let mut all_queries = vec![];
     for system in systems {

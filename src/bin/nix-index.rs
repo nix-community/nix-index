@@ -39,6 +39,7 @@ async fn update_index(args: &Args) -> Result<()> {
                 args.jobs,
                 &args.nixpkgs,
                 vec![args.system.as_deref()],
+                &args.extra_scopes,
                 args.show_trace,
             )?;
             (Either::Right(f), w)
@@ -168,6 +169,18 @@ struct Args {
     /// Note: does not check if the cached data is up to date! Use only for development.
     #[clap(long)]
     path_cache: bool,
+
+    // We also add some additional sets that only show up in `nix-env -qa -A someSet`.
+    //
+    // Some of these sets are not build directly by hydra. We still include them here
+    // since parts of these sets may be build as dependencies of other packages
+    // that are build by hydra. This way, our attribute path information is more
+    // accurate.
+    //
+    // We only need sets that are not marked "recurseIntoAttrs" here, since if they are,
+    // they are already part of normal_paths.
+    #[clap(long, default_values = ["haskellPackages", "rPackages", "coqPackages", "texlive.pkgs"])]
+    extra_scopes: Vec<String>,
 }
 
 #[tokio::main]
