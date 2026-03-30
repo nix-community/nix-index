@@ -63,17 +63,19 @@ impl Writer {
 
     /// Add a new package to the database for the given store path with its corresponding
     /// file tree. Entries are only added if they match `filter_prefix`.
+    ///
+    /// Returns the number of entries that were skipped due to invalid bytes.
     pub fn add(
         &mut self,
         path: StorePath,
         files: FileTree,
         filter_prefix: &[u8],
-    ) -> io::Result<()> {
+    ) -> io::Result<usize> {
         let entries = files.to_list(filter_prefix);
 
         // Don't add packages with no file entries to the database.
         if entries.is_empty() {
-            return Ok(());
+            return Ok(0);
         }
         let writer = self.writer.as_mut().expect("not dropped yet");
         let mut encoder = frcode::Encoder::new(
@@ -81,10 +83,17 @@ impl Writer {
             b"p".to_vec(),
             serde_json::to_vec(&path).expect("failed to serialize path"),
         );
+        let mut skipped = 0;
         for entry in entries {
+            // Skip entries with invalid bytes (NUL or newlines) that cannot be encoded
+            // in the frcode format. This can happen with malformed symlink targets.
+            if entry.has_invalid_bytes() {
+                skipped += 1;
+                continue;
+            }
             entry.encode(&mut encoder)?;
         }
-        Ok(())
+        Ok(skipped)
     }
 
     /// Finishes encoding. After calling this function, `add` may no longer be called, since this function

@@ -88,18 +88,51 @@ async fn update_index(args: &Args) -> Result<()> {
         })?;
 
     let mut results: Vec<(StorePath, String, FileTree)> = Vec::new();
+    let mut total_skipped = 0usize;
+    let mut packages_with_skipped: Vec<(String, usize)> = Vec::new();
     while let Some(entry) = files.next().await {
         if args.path_cache {
             results.push(entry.clone());
         }
         let (path, _, files) = entry;
-        db.add(path, files, args.filter_prefix.as_bytes())
+        let path_name = path.name().to_string();
+        let skipped = db
+            .add(path, files, args.filter_prefix.as_bytes())
             .map_err(|e| Error::WriteDatabase {
                 path: args.database.clone(),
                 source: e,
             })?;
+        if skipped > 0 {
+            total_skipped += skipped;
+            packages_with_skipped.push((path_name, skipped));
+        }
     }
     eprintln!();
+
+    // Report skipped entries
+    if total_skipped > 0 {
+        eprintln!(
+            "warning: skipped {} entries with invalid bytes (newlines/NUL in paths)",
+            total_skipped.separated_string()
+        );
+        if args.verbose {
+            for (pkg, count) in &packages_with_skipped {
+                eprintln!("  - {}: {} entries", pkg, count);
+            }
+        } else if packages_with_skipped.len() > 5 {
+            for (pkg, count) in packages_with_skipped.iter().take(5) {
+                eprintln!("  - {pkg}: {count} entries");
+            }
+            eprintln!(
+                "  ... and {} more packages (use --verbose to see all)",
+                packages_with_skipped.len() - 5
+            );
+        } else {
+            for (pkg, count) in &packages_with_skipped {
+                eprintln!("  - {pkg}: {count} entries");
+            }
+        }
+    }
 
     if args.path_cache {
         eprintln!("+ writing path cache");
@@ -168,6 +201,10 @@ struct Args {
     /// Note: does not check if the cached data is up to date! Use only for development.
     #[clap(long)]
     path_cache: bool,
+
+    /// Show verbose output (e.g., list all packages with skipped entries)
+    #[clap(short, long)]
+    verbose: bool,
 }
 
 #[tokio::main]
