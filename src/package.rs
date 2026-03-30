@@ -209,7 +209,7 @@ impl StorePath {
     /// let store_path = StorePath::parse(origin, "/nix/store/010yd8jls8w4vcnql4zhjbnyp2yay5pl-bash-4.4-p5").unwrap();
     /// assert_eq!(&store_path.name(), "bash-4.4-p5");
     /// ```
-    pub fn name(&self) -> Cow<str> {
+    pub fn name(&self) -> Cow<'_, str> {
         Cow::Borrowed(&self.name)
     }
 
@@ -225,7 +225,7 @@ impl StorePath {
     /// let store_path = StorePath::parse(origin, "/nix/store/010yd8jls8w4vcnql4zhjbnyp2yay5pl-bash-4.4-p5").unwrap();
     /// assert_eq!(&store_path.name(), "bash-4.4-p5");
     /// ```
-    pub fn hash(&self) -> Cow<str> {
+    pub fn hash(&self) -> Cow<'_, str> {
         Cow::Borrowed(&self.hash)
     }
 
@@ -243,7 +243,7 @@ impl StorePath {
     /// let store_path = StorePath::parse(origin, "/nix/store/010yd8jls8w4vcnql4zhjbnyp2yay5pl-bash-4.4-p5").unwrap();
     /// assert_eq!(&store_path.store_dir(), "/nix/store");
     /// ```
-    pub fn store_dir(&self) -> Cow<str> {
+    pub fn store_dir(&self) -> Cow<'_, str> {
         Cow::Borrowed(&self.store_dir)
     }
 
@@ -258,7 +258,7 @@ impl StorePath {
     /// let store_path = StorePath::parse(origin, "/nix/store/010yd8jls8w4vcnql4zhjbnyp2yay5pl-bash-4.4-p5").unwrap();
     /// assert_eq!(&store_path.as_str(), "/nix/store/010yd8jls8w4vcnql4zhjbnyp2yay5pl-bash-4.4-p5");
     /// ```
-    pub fn as_str(&self) -> Cow<str> {
+    pub fn as_str(&self) -> Cow<'_, str> {
         Cow::Owned(format!("{}/{}-{}", self.store_dir, self.hash, self.name))
     }
 
@@ -275,7 +275,7 @@ impl StorePath {
     /// let store_path = StorePath::parse(origin.clone(), "/nix/store/010yd8jls8w4vcnql4zhjbnyp2yay5pl-bash-4.4-p5").unwrap();
     /// assert_eq!(store_path.origin().as_ref(), &origin);
     /// ```
-    pub fn origin(&self) -> Cow<PathOrigin> {
+    pub fn origin(&self) -> Cow<'_, PathOrigin> {
         Cow::Borrowed(&self.origin)
     }
 }

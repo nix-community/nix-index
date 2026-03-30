@@ -160,7 +160,7 @@ impl Reader {
     /// Builds a query to find all entries in the database that have a filename matching the given pattern.
     ///
     /// Afterwards, use `Query::into_iter` to iterate over the items.
-    pub fn query(self, exact_regex: &Regex) -> Query {
+    pub fn query(self, exact_regex: &Regex) -> Query<'_, '_> {
         Query {
             reader: self,
             exact_regex,
