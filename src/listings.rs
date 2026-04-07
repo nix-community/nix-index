@@ -165,9 +165,7 @@ pub fn fetch<'a>(
         .flat_map_iter(|&(system, scope)| {
             nixpkgs::query_packages(nixpkgs, system, scope.as_deref(), show_trace)
         })
-        .filter_map(|r| {
-            r.map_err(|e| eprintln!("{}", e)).ok()
-        })
+        .filter_map(|r| r.map_err(|e| eprintln!("{}", e)).ok())
         .collect();
 
     Ok(fetch_listings_impl(fetcher, jobs, all_paths))
