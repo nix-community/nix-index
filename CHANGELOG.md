@@ -1,7 +1,11 @@
-## 0.1.10 [Unreleased]
+## 0.1.11 [Unreleased]
 ### Added
 ### Fixed
 ### Changed
+
+## 0.1.10
+
+* Fixed `command-not-found.nu` to not use `--top-level`. (#276)
 
 ## 0.1.9
 ### Added
