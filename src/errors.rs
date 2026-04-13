@@ -6,8 +6,9 @@ use crate::{hydra, nixpkgs, package::StorePath};
 
 #[derive(Error, Debug)]
 pub enum Error {
-    #[error("querying available packages failed: {source}")]
+    #[error("querying available packages in set {} failed: {source}", package_set.as_ref().unwrap_or(&".".to_string()))]
     QueryPackages {
+        package_set: Option<String>,
         #[source]
         source: nixpkgs::Error,
     },
@@ -36,13 +37,13 @@ pub enum Error {
     #[error("writing the paths.cache file failed: {source}")]
     WritePathsCache {
         #[source]
-        source: Box<dyn std::error::Error>,
+        source: Box<dyn std::error::Error + Send>,
     },
     #[error("creating the database at '{path:?}' failed: {source}")]
     CreateDatabase {
         path: PathBuf,
         #[source]
-        source: Box<dyn std::error::Error>,
+        source: Box<dyn std::error::Error + Send>,
     },
     #[error("creating the directory for the database at '{path:?}' failed: {source}")]
     CreateDatabaseDir {
