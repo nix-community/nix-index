@@ -57,17 +57,19 @@ It also comes with nixos/home-manager modules to use those databases.
 
 ### Usage as a command-not-found replacement
 
-Nix-index provides a "command-not-found" script that can print for you the attribute path of unfound commands in your shell. You can either source `${pkgs.nix-index}/etc/command-not-found.sh` in your own shell init files (works for ZSH and Bash for as far as we know) or you can use the following in home-manager / `/etc/nixos/configuration.nix`:
+Nix-index provides a "command-not-found" script that can print for you the attribute path of unfound commands in your shell. You can either source `${pkgs.nix-index}/etc/command-not-found.sh` in your own shell init files (works for ZSH and Bash for as far as we know) or you can use the following in your home-manager or NixOS configuration:
 
 ```nix
-    programs.command-not-found.enable = false;
-    # for home-manager, use programs.bash.initExtra instead
-    programs.bash.interactiveShellInit = ''
-      source ${pkgs.nix-index}/etc/profile.d/command-not-found.sh
-    '';
+   programs.command-not-found.enable = false;
+   programs.nix-index = {
+      enable = true;
+      enableZshIntegration = true;
+      enableBashIntegration = true;
+      enableFishIntegration = true;
+   };
 ```
 
-Replace `bash` with `zsh` if you use `zsh`.
+You can configure one or more shells as shown above.
 
 Example output:
 
@@ -80,8 +82,6 @@ by typing:
 Or run it once with:
   nix-shell -p blender.out --run ...
 ```
-
-A [`home-manager` module](https://nix-community.github.io/home-manager/options.html#opt-programs.nix-index.enable) is now available to integrate `nix-index` with `bash`, `zsh`, and `fish` using this script.
 
 You can also use `command-not-found.nu` as a Nushell hook by adding the
 following to your Nushell config:
