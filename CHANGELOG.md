@@ -1,7 +1,19 @@
-## 0.1.10 [Unreleased]
+## 0.1.11 [Unreleased]
 ### Added
 ### Fixed
 ### Changed
+
+## 0.1.10
+### Added
+
+* Make extra scopes overridable from CLI. (#301)
+
+### Fixed
+
+* Fixed `command-not-found.nu` to not use `--top-level`. (#276)
+* Respect system certificates. (#289)
+* Drop `xorg` from extra scopes. (#296)
+* Drop `nodePackages` from extra scopes. (#300)
 
 ## 0.1.9
 ### Added
