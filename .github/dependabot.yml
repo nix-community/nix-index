@@ -1,6 +1,34 @@
 version: 2
+
 updates:
-  - package-ecosystem: "nix"
-    directory: "/"
+  - package-ecosystem: cargo
+    directory: /
     schedule:
-      interval: "weekly"
+      interval: monthly
+    cooldown:
+      default-days: 7
+    groups:
+      cargo:
+        patterns: ["*"]
+
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: monthly
+    cooldown:
+      default-days: 7
+    groups:
+      github-actions:
+        patterns: ["*"]
+
+  - package-ecosystem: nix
+    directory: /
+    schedule:
+      interval: monthly
+    # TODO: enable cooldowns once upstream bug is fixed
+    # https://github.com/dependabot/dependabot-core/pull/14829
+    # cooldown:
+    #   default-days: 7
+    groups:
+      nix:
+        patterns: ["*"]
