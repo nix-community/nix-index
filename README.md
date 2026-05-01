@@ -81,7 +81,7 @@ Or run it once with:
   nix-shell -p blender.out --run ...
 ```
 
-A [`home-manager` module](https://nix-community.github.io/home-manager/options.html#opt-programs.nix-index.enable) is now available to integrate `nix-index` with `bash`, `zsh`, and `fish` using this script.
+A [`home-manager` module](https://nix-community.github.io/home-manager/options.xhtml#opt-programs.nix-index.enable) is now available to integrate `nix-index` with `bash`, `zsh`, and `fish` using this script.
 
 You can also use `command-not-found.nu` as a Nushell hook by adding the
 following to your Nushell config:
