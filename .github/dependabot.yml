@@ -25,10 +25,8 @@ updates:
     directory: /
     schedule:
       interval: monthly
-    # TODO: enable cooldowns once upstream bug is fixed
-    # https://github.com/dependabot/dependabot-core/pull/14829
-    # cooldown:
-    #   default-days: 7
+    cooldown:
+      default-days: 7
     groups:
       nix:
         patterns: ["*"]
