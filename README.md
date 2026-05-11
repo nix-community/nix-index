@@ -52,7 +52,7 @@ First, you need to generate an index by running `nix-index` (it takes around 5 m
 
 ### Use pre-generated database
 
-[nix-index-database](https://github.com/Mic92/nix-index-database) provides pre-generated databases if you don't want to generate a database locally.
+[nix-index-database](https://github.com/nix-community/nix-index-database) provides pre-generated databases if you don't want to generate a database locally.
 It also comes with nixos/home-manager modules to use those databases.
 
 ### Usage as a command-not-found replacement
