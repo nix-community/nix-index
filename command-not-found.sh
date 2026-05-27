@@ -19,6 +19,13 @@ command_not_found_handle () {
     attrs=$(@out@/bin/nix-locate --minimal --no-group --type x --type s --whole-name --at-root "/bin/$cmd")
     len=$(echo -n "$attrs" | grep -c "^")
 
+    # Check if comma is available on the system
+    if command -v comma >/dev/null 2>&1; then
+        COMMA_FOUND=true
+    else
+        COMMA_FOUND=false
+    fi
+
     case $len in
         0)
             >&2 echo "$cmd: command not found"
@@ -90,6 +97,9 @@ Or run it once with:
   nix-shell -p $attrs --run '$cmd ...'
 EOF
                 fi
+                if [ "$COMMA_FOUND" = true ]; then
+                    >&2 echo "  comma $cmd ..."
+                fi
             fi
             ;;
         *)
@@ -120,6 +130,9 @@ EOF
                     >&2 echo "  nix-shell -p $attr --run '$cmd ...'"
                 fi
             done <<< "$attrs"
+            if [ "$COMMA_FOUND" = true ]; then
+                >&2 echo "  comma $cmd ..."
+            fi
             ;;
     esac
 
