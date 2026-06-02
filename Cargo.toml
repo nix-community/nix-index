@@ -38,11 +38,11 @@ owo-colors = { version = "4.0.0", features = ["supports-colors"] }
 rayon = "1.12.0"
 regex = "1.10.4"
 regex-syntax = "0.8.5"
-reqwest = { version = "0.13.3", features = [ "brotli" ] }
+reqwest = { version = "0.13.4", features = [ "brotli" ] }
 separator = "0.4.1"
 serde = { version = "1.0.198", features = [ "derive" ] }
 serde_bytes = "0.11.14"
-serde_json = "1.0.116"
+serde_json = "1.0.150"
 thiserror = "2.0.12"
 tokio-retry = "0.3.1"
 xdg = "3.0.0"
@@ -52,7 +52,7 @@ zstd = { version = "0.13.3", features = [ "zstdmt" ] }
 
 [dependencies.tokio]
 features = ["full"]
-version = "1.52.1"
+version = "1.52.3"
 
 [dependencies.clap]
 version = "4.6.1"
@@ -60,7 +60,7 @@ features = ["derive", "env"]
 
 [dependencies.rusqlite]
 features = ["backup"]
-version = "0.39.0"
+version = "0.40.0"
 
 [[example]]
 name = "nix-index-debug"
