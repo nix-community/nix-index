@@ -1,16 +1,18 @@
+use std::collections::HashMap;
 use std::fs::File;
 use std::io;
 use std::iter::FromIterator;
 
-use futures::{Stream, StreamExt, TryFutureExt};
+use futures::{Stream, StreamExt};
 use indexmap::map::Entry;
 use indexmap::IndexMap;
 use rayon::prelude::{IntoParallelRefIterator, ParallelIterator};
+use serde_bytes::ByteBuf;
 
 use crate::errors::{Error, Result};
 use crate::files::FileTree;
 use crate::hydra::Fetcher;
-use crate::nixpkgs;
+use crate::nixpkgs::{self, PackageOutput};
 use crate::package::StorePath;
 use crate::workset::{WorkSet, WorkSetHandle, WorkSetWatch};
 
@@ -21,6 +23,21 @@ use crate::workset::{WorkSet, WorkSetHandle, WorkSetWatch};
 pub trait FileListingStream: Stream<Item = Result<Option<(StorePath, String, FileTree)>>> {}
 impl<T> FileListingStream for T where T: Stream<Item = Result<Option<(StorePath, String, FileTree)>>>
 {}
+
+/// Builds a synthetic file listing containing just `/bin/$main_program`.
+///
+/// This can be used to supplement the set of packages built by Hydra. Note that this function
+/// always returns zero for the size of the executable file, and an empty string for the nar.
+fn synthesize_main_program(path: StorePath, main_program: String) -> (StorePath, String, FileTree) {
+    let tree = HashMap::from([(
+        ByteBuf::from(b"bin".to_vec()),
+        FileTree::directory(HashMap::from([(
+            ByteBuf::from(main_program.into_bytes()),
+            FileTree::regular(0, true),
+        )])),
+    )]);
+    (path, String::new(), FileTree::directory(tree))
+}
 
 /// Fetches all the file listings for the full closure of the given starting set of path.
 ///
@@ -34,24 +51,24 @@ impl<T> FileListingStream for T where T: Stream<Item = Result<Option<(StorePath,
 fn fetch_listings_impl(
     fetcher: &Fetcher,
     jobs: usize,
-    starting_set: Vec<StorePath>,
+    starting_set: Vec<PackageOutput>,
 ) -> (impl FileListingStream + '_, WorkSetWatch) {
     // Create the queue that will hold all the paths that still need processing.
     // Initially, only the starting set needs processing.
 
     // We can't use FromIterator here as we want shorter paths to win
-    let mut map: IndexMap<String, StorePath> = IndexMap::with_capacity(starting_set.len());
+    let mut map: IndexMap<String, PackageOutput> = IndexMap::with_capacity(starting_set.len());
 
-    for path in starting_set {
-        let hash = path.hash().into();
+    for output in starting_set {
+        let hash = output.path.hash().into();
         match map.entry(hash) {
             Entry::Occupied(mut e) => {
-                if e.get().origin().attr.len() > path.origin().attr.len() {
-                    e.insert(path);
+                if e.get().path.origin().attr.len() > output.path.origin().attr.len() {
+                    e.insert(output);
                 }
             }
             Entry::Vacant(e) => {
-                e.insert(path);
+                e.insert(output);
             }
         };
     }
@@ -60,18 +77,20 @@ fn fetch_listings_impl(
 
     // Processes a single store path, fetching the file listing for it and
     // adding its references to the queue
-    let process = move |mut handle: WorkSetHandle<_, _>, path: StorePath| async move {
-        let Some(parsed) = fetcher
-            .fetch_references(path.clone())
-            .map_err(|e| Error::FetchReferences { path, source: e })
-            .await?
-        else {
-            return Ok(None);
+    let process = move |mut handle: WorkSetHandle<_, _>, PackageOutput { path, main_program }| async move {
+        let parsed = match fetcher.fetch_references(path.clone()).await {
+            Err(e) => return Err(Error::FetchReferences { path, source: e }),
+            Ok(Some(parsed)) => parsed,
+            Ok(None) => return Ok(main_program.map(|p| synthesize_main_program(path, p))),
         };
 
         for reference in parsed.references {
             let hash = reference.hash().into_owned();
-            handle.add_work(hash, reference);
+            let output = PackageOutput {
+                path: reference,
+                main_program: None,
+            };
+            handle.add_work(hash, output);
         }
 
         let path = parsed.store_path.clone();
@@ -83,7 +102,7 @@ fn fetch_listings_impl(
                 source: e,
             }),
             Ok(Some(files)) => Ok(Some((path, nar_path, files))),
-            Ok(None) => Ok(None),
+            Ok(None) => Ok(main_program.map(|p| synthesize_main_program(parsed.store_path, p))),
         }
     };
 
@@ -132,6 +151,7 @@ pub fn fetch<'a>(
     systems: Vec<Option<&str>>,
     extra_scopes: &[String],
     show_trace: bool,
+    main_program: bool,
 ) -> Result<(impl FileListingStream + 'a, WorkSetWatch)> {
     let mut scopes = vec![None];
     scopes.extend(
@@ -151,10 +171,10 @@ pub fn fetch<'a>(
     }
 
     // Collect results in parallel.
-    let all_paths = all_queries
+    let all_paths: nixpkgs::Packages = all_queries
         .par_iter()
         .map(|&(system, scope)| {
-            nixpkgs::query_packages(nixpkgs, system, scope.as_deref(), show_trace)
+            nixpkgs::query_packages(nixpkgs, system, scope.as_deref(), show_trace, main_program)
         })
         .collect::<std::result::Result<Vec<nixpkgs::Packages>, nixpkgs::Error>>()
         .map_err(|e| Error::QueryPackages { source: e })?

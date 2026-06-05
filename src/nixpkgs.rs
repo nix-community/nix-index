@@ -24,12 +24,16 @@ use crate::package::{PathOrigin, StorePath};
 /// If scope is `Some(attr)`, nix-env is called with the `-A attr` argument so only packages that are a member
 /// of `attr` are returned.
 ///
+/// If `main_program` is true, nix-env is also passed `--meta` so that each package's
+/// `meta.mainProgram` is included in the output.
+///
 /// The function returns an [`IntoIterator`] over the packages returned by nix-env.
 pub fn query_packages(
     nixpkgs: &str,
     system: Option<&str>,
     scope: Option<&str>,
     show_trace: bool,
+    main_program: bool,
 ) -> Result<Packages, Error> {
     let mut cmd = Command::new("nix-env");
     cmd.arg("-qaP")
@@ -47,6 +51,13 @@ pub fn query_packages(
         .stderr(Stdio::piped())
         .stdin(Stdio::null());
 
+    if main_program {
+        // Query package meta so we can read `meta.mainProgram`, used to synthesize a
+        // `/bin/$mainProgram` listing for packages not built by Hydra. We skip it otherwise:
+        // `--meta` makes nix-env emit roughly ten times as much output.
+        cmd.arg("--meta");
+    }
+
     if let Some(system) = system {
         cmd.arg("--argstr").arg("system").arg(system);
     }
@@ -62,10 +73,16 @@ pub fn query_packages(
     run(cmd)
 }
 
-/// An [`IntoIterator`] of parsed store paths from the output of nix-env.
+#[derive(Debug)]
+pub struct PackageOutput {
+    pub path: StorePath,
+    pub main_program: Option<String>,
+}
+
+/// An [`IntoIterator`] of parsed store paths and main programs from the output of nix-env.
 ///
 /// Use `query_packages` to create a value of this type.
-pub type Packages = Vec<StorePath>;
+pub type Packages = Vec<PackageOutput>;
 
 /// Spawns the nix-env subprocess and runs the parser,
 /// waits for it to exit, and checks whether it has returned a non-zero exit code
@@ -91,7 +108,7 @@ fn run(mut cmd: Command) -> Result<Packages, Error> {
         )));
     }
 
-    Ok(parsed?.items)
+    Ok(parsed?.outputs)
 }
 
 /// A parser error that may occur during parsing `nix-env`'s output.
@@ -106,31 +123,67 @@ struct Output {
 }
 
 #[derive(Debug, Deserialize)]
+struct Meta {
+    #[serde(rename = "@name")]
+    name: String,
+    #[serde(rename = "@value")]
+    value: Option<String>,
+}
+
+fn main_program<'de, D: Deserializer<'de>>(deserializer: D) -> Result<Option<String>, D::Error> {
+    Ok(Vec::<Meta>::deserialize(deserializer)?
+        .into_iter()
+        .find(|meta| meta.name == "mainProgram")
+        .and_then(|meta| meta.value))
+}
+
+#[derive(Debug, Deserialize)]
 struct Item {
     #[serde(rename = "@attrPath")]
     attr_path: String,
+    #[serde(rename = "@outputName", default)]
+    output_name: String,
     #[serde(rename = "@system")]
     system: String,
     #[serde(rename = "output", default)]
     outputs: Vec<Output>,
+    #[serde(rename = "meta", default, deserialize_with = "main_program")]
+    main_program: Option<String>,
 }
 
 impl Item {
-    fn consume<E: de::Error>(self, store_paths: &mut Vec<StorePath>) -> Result<(), E> {
+    fn consume<E: de::Error>(self, outputs: &mut Vec<PackageOutput>) -> Result<(), E> {
+        // By convention (`lib.getExe`), `meta.mainProgram` names the executable
+        // `bin/$mainProgram` in the package's "bin" output, falling back to its "out"
+        // output and then its default output (the `lib.getBin` chain `pkg.bin or pkg.out or pkg`).
+        // It is not in every output, so tag only that one.
+        let main_output: &str = if self.outputs.iter().any(|output| output.name == "bin") {
+            "bin"
+        } else if self.outputs.iter().any(|output| output.name == "out") {
+            "out"
+        } else {
+            &self.output_name
+        };
+
         for output in self.outputs {
+            let main_program = if output.name == main_output {
+                self.main_program.clone()
+            } else {
+                None
+            };
             let origin = PathOrigin {
                 attr: self.attr_path.clone(),
                 output: output.name,
                 toplevel: true,
                 system: Some(self.system.clone()),
             };
-            let store_path = StorePath::parse(origin, &output.path).ok_or_else(|| {
+            let path = StorePath::parse(origin, &output.path).ok_or_else(|| {
                 de::Error::custom(format!(
                     "store path does not match expected format /prefix/hash-name: {}",
                     output.path
                 ))
             })?;
-            store_paths.push(store_path);
+            outputs.push(PackageOutput { path, main_program });
         }
         Ok(())
     }
@@ -138,28 +191,28 @@ impl Item {
 
 #[derive(Debug, Deserialize)]
 struct Items {
-    #[serde(rename = "item", default, deserialize_with = "deserialize_items")]
-    items: Vec<StorePath>,
+    #[serde(rename = "item", default, deserialize_with = "package_outputs")]
+    outputs: Vec<PackageOutput>,
 }
 
-fn deserialize_items<'de, D: Deserializer<'de>>(
+fn package_outputs<'de, D: Deserializer<'de>>(
     deserializer: D,
-) -> Result<Vec<StorePath>, D::Error> {
+) -> Result<Vec<PackageOutput>, D::Error> {
     struct ItemsVisitor;
 
     impl<'de> Visitor<'de> for ItemsVisitor {
-        type Value = Vec<StorePath>;
+        type Value = Vec<PackageOutput>;
 
         fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
             write!(formatter, "a sequence of `<item>` elements")
         }
 
         fn visit_seq<A: SeqAccess<'de>>(self, mut seq: A) -> Result<Self::Value, A::Error> {
-            let mut store_paths = Vec::new();
+            let mut outputs = Vec::new();
             while let Some(item) = seq.next_element::<Item>()? {
-                item.consume(&mut store_paths)?;
+                item.consume(&mut outputs)?;
             }
-            Ok(store_paths)
+            Ok(outputs)
         }
     }
 
