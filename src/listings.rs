@@ -153,11 +153,14 @@ pub fn fetch<'a>(
     // Collect results in parallel.
     let all_paths = all_queries
         .par_iter()
-        .flat_map_iter(|&(system, scope)| {
+        .map(|&(system, scope)| {
             nixpkgs::query_packages(nixpkgs, system, scope.as_deref(), show_trace)
         })
-        .collect::<std::result::Result<_, nixpkgs::Error>>()
-        .map_err(|e| Error::QueryPackages { source: e })?;
+        .collect::<std::result::Result<Vec<nixpkgs::Packages>, nixpkgs::Error>>()
+        .map_err(|e| Error::QueryPackages { source: e })?
+        .into_iter()
+        .flatten()
+        .collect();
 
     Ok(fetch_listings_impl(fetcher, jobs, all_paths))
 }
