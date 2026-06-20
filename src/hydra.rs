@@ -270,20 +270,30 @@ impl Fetcher {
         let name = format!("{}.json", path.hash());
 
         let (url, body) = self.fetch(url_generic).await?;
-        let contents = match body {
+        let raw = match body {
             Some(v) => v,
             None => {
                 let (_, Some(body)) = self.fetch(url_xz.clone()).await? else {
                     return Ok(None);
                 };
+                body
+            }
+        };
 
+        // cache.nixos.org keeps the `.ls` name but serves compressed bodies with
+        // no Content-Encoding header, so sniff the magic bytes to decode.
+        let contents = match raw.as_slice() {
+            [0x28, 0xb5, 0x2f, 0xfd, ..] => {
+                zstd::decode_all(&raw[..]).map_err(|e| Error::Decode { url: e.to_string() })?
+            }
+            [0xfd, b'7', b'z', b'X', b'Z', 0x00, ..] => {
                 let mut unpacked = vec![];
-                XzDecoder::new(&body[..])
+                XzDecoder::new(&raw[..])
                     .read_to_end(&mut unpacked)
                     .map_err(|e| Error::Decode { url: e.to_string() })?;
-
                 unpacked
             }
+            _ => raw,
         };
 
         let now = Instant::now();
