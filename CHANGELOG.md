@@ -3,6 +3,13 @@
 ### Fixed
 ### Changed
 
+* The database is now split into independently-compressed zstd frames so that
+  `nix-locate` decompresses and searches them in parallel across all CPU cores,
+  making queries several times faster. Old (single-frame) databases are still
+  readable, but must be regenerated with `nix-index` to get the speedup.
+  `nix-index --format-version 1` writes the legacy single-frame format for
+  consumers that require it.
+
 ## 0.1.11
 ### Added
 
