@@ -160,7 +160,7 @@ struct Args {
     show_trace: bool,
 
     /// Only add paths starting with PREFIX (e.g. `/bin/`)
-    #[clap(long, default_value = "")]
+    #[clap(long, default_value = "/bin/")]
     filter_prefix: String,
 
     /// Store and load results of fetch phase in a file called paths.cache. This speeds up testing
