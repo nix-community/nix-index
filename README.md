@@ -1,6 +1,9 @@
 # nix-index
 ## A files database for nixpkgs
-**nix-index** is a tool to quickly locate the package providing a certain file in [`nixpkgs`](https://github.com/NixOS/nixpkgs). It indexes built derivations found in binary caches. 
+**nix-index** is a tool to quickly locate the package providing a certain file in [`nixpkgs`](https://github.com/NixOS/nixpkgs).
+It holds a local database which is built by
+evaluating all packages in nixpkgs
+and then indexing their built derivations found in binary caches.
 
 ###### Demo
 
@@ -16,6 +19,9 @@ camlistore.out                                7,938,952 x /nix/store/xn5ivjdyslx
 ## Installation
 
 ### Flakes
+
+> [!NOTE]
+> Creating the database may take some time & resources, see [Usage](#Usage) section below.
 
 1. create the database:
 
@@ -48,7 +54,14 @@ $ nix-env -iA nixos.nix-index
 ```
 
 ## Usage
-First, you need to generate an index by running `nix-index` (it takes around 5 minutes) . Then, you can use `nix-locate pattern`. For more information, see `nix-locate --help` and `nix-index --help`.
+
+> [!NOTE]
+> Building the database locally may take up to **2 hours**,
+> mostly independent from your hardware configuration,
+> and requires roughly **10-12 GiB of RAM** as of July 2026.
+
+First, you need to generate an index by running `nix-index`.
+Then, you can use `nix-locate pattern`. For more information, see `nix-locate --help` and `nix-index --help`.
 
 ### Use pre-generated database
 
