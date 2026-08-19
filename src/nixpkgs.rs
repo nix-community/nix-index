@@ -5,12 +5,11 @@
 //! and hashes.
 use std::error;
 use std::fmt;
-use std::io::{self, Read};
-use std::process::{Child, ChildStdout, Command, Stdio};
+use std::io::{self, BufReader};
+use std::process::{Command, Stdio};
 
-use xml;
-use xml::common::{Position, TextPosition};
-use xml::reader::{EventReader, XmlEvent};
+use serde::de::{self, SeqAccess, Visitor};
+use serde::{Deserialize, Deserializer};
 
 use crate::package::{PathOrigin, StorePath};
 
@@ -25,13 +24,17 @@ use crate::package::{PathOrigin, StorePath};
 /// If scope is `Some(attr)`, nix-env is called with the `-A attr` argument so only packages that are a member
 /// of `attr` are returned.
 ///
-/// The function returns an Iterator over the packages returned by nix-env.
+/// If `main_program` is true, nix-env is also passed `--meta` so that each package's
+/// `meta.mainProgram` is included in the output.
+///
+/// The function returns an [`IntoIterator`] over the packages returned by nix-env.
 pub fn query_packages(
     nixpkgs: &str,
     system: Option<&str>,
     scope: Option<&str>,
     show_trace: bool,
-) -> PackagesQuery<ChildStdout> {
+    main_program: bool,
+) -> Result<Packages, Error> {
     let mut cmd = Command::new("nix-env");
     cmd.arg("-qaP")
         .arg("--out-path")
@@ -48,6 +51,13 @@ pub fn query_packages(
         .stderr(Stdio::piped())
         .stdin(Stdio::null());
 
+    if main_program {
+        // Query package meta so we can read `meta.mainProgram`, used to synthesize a
+        // `/bin/$mainProgram` listing for packages not built by Hydra. We skip it otherwise:
+        // `--meta` makes nix-env emit roughly ten times as much output.
+        cmd.arg("--meta");
+    }
+
     if let Some(system) = system {
         cmd.arg("--argstr").arg("system").arg(system);
     }
@@ -60,354 +70,153 @@ pub fn query_packages(
         cmd.arg("--show-trace");
     }
 
-    PackagesQuery {
-        parser: None,
-        child: None,
-        cmd: Some(cmd),
-    }
+    run(cmd)
 }
 
-/// An iterator that parses the output of nix-env and returns parsed store paths.
+#[derive(Debug)]
+pub struct PackageOutput {
+    pub path: StorePath,
+    pub main_program: Option<String>,
+}
+
+/// An [`IntoIterator`] of parsed store paths and main programs from the output of nix-env.
 ///
 /// Use `query_packages` to create a value of this type.
-pub struct PackagesQuery<R: Read> {
-    parser: Option<PackagesParser<R>>,
-    child: Option<Child>,
-    cmd: Option<Command>,
-}
+pub type Packages = Vec<PackageOutput>;
 
-impl PackagesQuery<ChildStdout> {
-    /// Spawns the nix-env subprocess and initializes the parser.
-    ///
-    /// If the subprocess was already spawned, does nothing.
-    fn ensure_initialized(&mut self) -> Result<(), Error> {
-        if let Some(mut cmd) = self.cmd.take() {
-            let mut child = cmd.spawn()?;
+/// Spawns the nix-env subprocess and runs the parser,
+/// waits for it to exit, and checks whether it has returned a non-zero exit code
+/// (= failed with an error).
+///
+/// If the exit code was non-zero, returns `Err(err)`, else it returns `Ok`.
+fn run(mut cmd: Command) -> Result<Packages, Error> {
+    let mut child = cmd.spawn()?;
+    let stdout = child.stdout.take().expect("should have stdout pipe");
+    let parsed: Result<Items, _> = quick_xml::de::from_reader(BufReader::new(stdout));
 
-            let stdout = child.stdout.take().expect("should have stdout pipe");
-            let parser = PackagesParser::new(stdout);
+    // Even when the parser throws an error, we first wait for the subprocess to exit.
+    //
+    // If the subprocess returned an error, then the parser probably tried to parse garbage output
+    // so we will ignore the parser error and instead return the error printed by the subprocess.
+    let result = child.wait_with_output()?;
+    if !result.status.success() {
+        let message = String::from_utf8_lossy(&result.stderr);
 
-            self.child = Some(child);
-            self.parser = Some(parser);
-        }
-        Ok(())
+        return Err(Error::Command(format!(
+            "nix-env failed with {}:\n{}",
+            result.status, message,
+        )));
     }
 
-    /// Waits for the subprocess to exit and checks whether it has returned a non-zero exit code
-    /// (= failed with an error).
-    ///
-    /// If the exit code was non-zero, returns Some(err), else it returns None.
-    fn check_error(&mut self) -> Option<Error> {
-        let mut run = || {
-            let child = match self.child.take() {
-                Some(c) => c,
-                None => return Ok(()),
-            };
-            let result = child.wait_with_output()?;
-
-            if !result.status.success() {
-                let message = String::from_utf8_lossy(&result.stderr);
-
-                return Err(Error::Command(format!(
-                    "nix-env failed with {}:\n{}",
-                    result.status, message,
-                )));
-            }
-
-            Ok(())
-        };
-
-        run().err()
-    }
-}
-
-impl Iterator for PackagesQuery<ChildStdout> {
-    type Item = Result<StorePath, Error>;
-
-    fn next(&mut self) -> Option<Self::Item> {
-        if let Err(e) = self.ensure_initialized() {
-            return Some(Err(e));
-        }
-        self.parser.take().and_then(|mut parser| {
-            parser
-                .next()
-                .map(|v| {
-                    self.parser = Some(parser);
-                    // When the parser throws an error, we first wait for the subprocess to exit.
-                    //
-                    // If the subprocess returned an error, then the parser probably tried to parse garbage output
-                    // so we will ignore the parser error and instead return the error printed by the subprocess.
-                    v.map_err(|e| self.check_error().unwrap_or_else(|| Error::from(e)))
-                })
-                .or_else(|| {
-                    self.parser = None;
-                    // At the end, we should check if the subprocess exited successfully.
-                    self.check_error().map(Err)
-                })
-        })
-    }
-}
-
-/// Parses the XML output of `nix-env` and returns individual store paths.
-struct PackagesParser<R: Read> {
-    events: EventReader<R>,
-    current_item: Option<(String, String)>,
+    Ok(parsed?.outputs)
 }
 
 /// A parser error that may occur during parsing `nix-env`'s output.
-#[derive(Debug)]
-pub struct ParserError {
-    position: TextPosition,
-    kind: ParserErrorKind,
+type ParserError = quick_xml::DeError;
+
+#[derive(Debug, Deserialize)]
+struct Output {
+    #[serde(rename = "@name")]
+    name: String,
+    #[serde(rename = "@path")]
+    path: String,
 }
 
-/// Enumerates all possible error kinds that may occur during parsing.
-#[derive(Debug)]
-pub enum ParserErrorKind {
-    /// Found an element with the tag `element_name` that should only occur inside
-    /// elements with the tag `expected_parent` but it occurred as child of a different parent.
-    MissingParent {
-        element_name: String,
-        expected_parent: String,
-    },
-
-    /// An element occurred as a child of `found_parent`, but
-    /// we know that elements with the tag `element_name` should never have that as
-    /// a parent.
-    ParentNotAllowed {
-        element_name: String,
-        found_parent: String,
-    },
-
-    /// The required attribute `attribute_name` was missing on an element with the tag `element_name`.
-    MissingAttribute {
-        element_name: String,
-        attribute_name: String,
-    },
-
-    /// Found the end tag for `element_name` without a matching start tag.
-    MissingStartTag { element_name: String },
-
-    /// An XML syntax error.
-    XmlError { error: xml::reader::Error },
-
-    /// A store path in the output of `nix-env` could not be parsed. All valid store paths
-    /// need to match the format `$(STOREDIR)$(HASH)-$(NAME)`.
-    InvalidStorePath { path: String },
+#[derive(Debug, Deserialize)]
+struct Meta {
+    #[serde(rename = "@name")]
+    name: String,
+    #[serde(rename = "@value")]
+    value: Option<String>,
 }
 
-impl fmt::Display for ParserError {
-    fn fmt(&self, f: &mut fmt::Formatter) -> Result<(), fmt::Error> {
-        use self::ParserErrorKind::*;
-        write!(f, "error at {}: ", self.position)?;
-        match self.kind {
-            MissingParent {
-                ref element_name,
-                ref expected_parent,
-            } => {
-                write!(
-                    f,
-                    "element {} appears outside of expected parent {}",
-                    element_name, expected_parent
-                )
-            }
-            ParentNotAllowed {
-                ref element_name,
-                ref found_parent,
-            } => {
-                write!(
-                    f,
-                    "element {} must not appear as child of {}",
-                    element_name, found_parent
-                )
-            }
-            MissingAttribute {
-                ref element_name,
-                ref attribute_name,
-            } => {
-                write!(
-                    f,
-                    "element {} must have an attribute named {}",
-                    element_name, attribute_name
-                )
-            }
-            MissingStartTag { ref element_name } => {
-                write!(f, "element {} does not have a start tag", element_name)
-            }
-            XmlError { ref error } => write!(f, "document not well-formed: {}", error),
-            InvalidStorePath { ref path } => {
-                write!(
-                    f,
+fn main_program<'de, D: Deserializer<'de>>(deserializer: D) -> Result<Option<String>, D::Error> {
+    Ok(Vec::<Meta>::deserialize(deserializer)?
+        .into_iter()
+        .find(|meta| meta.name == "mainProgram")
+        .and_then(|meta| meta.value))
+}
+
+#[derive(Debug, Deserialize)]
+struct Item {
+    #[serde(rename = "@attrPath")]
+    attr_path: String,
+    #[serde(rename = "@outputName", default)]
+    output_name: String,
+    #[serde(rename = "@system")]
+    system: String,
+    #[serde(rename = "output", default)]
+    outputs: Vec<Output>,
+    #[serde(rename = "meta", default, deserialize_with = "main_program")]
+    main_program: Option<String>,
+}
+
+impl Item {
+    fn consume<E: de::Error>(self, outputs: &mut Vec<PackageOutput>) -> Result<(), E> {
+        // By convention (`lib.getExe`), `meta.mainProgram` names the executable
+        // `bin/$mainProgram` in the package's "bin" output, falling back to its "out"
+        // output and then its default output (the `lib.getBin` chain `pkg.bin or pkg.out or pkg`).
+        // It is not in every output, so tag only that one.
+        let main_output: &str = if self.outputs.iter().any(|output| output.name == "bin") {
+            "bin"
+        } else if self.outputs.iter().any(|output| output.name == "out") {
+            "out"
+        } else {
+            &self.output_name
+        };
+
+        for output in self.outputs {
+            let main_program = if output.name == main_output {
+                self.main_program.clone()
+            } else {
+                None
+            };
+            let origin = PathOrigin {
+                attr: self.attr_path.clone(),
+                output: output.name,
+                toplevel: true,
+                system: Some(self.system.clone()),
+            };
+            let path = StorePath::parse(origin, &output.path).ok_or_else(|| {
+                de::Error::custom(format!(
                     "store path does not match expected format /prefix/hash-name: {}",
-                    path
-                )
-            }
+                    output.path
+                ))
+            })?;
+            outputs.push(PackageOutput { path, main_program });
         }
+        Ok(())
     }
 }
 
-impl<R: Read> PackagesParser<R> {
-    /// Creates a new parser that reads the `nix-env` XML output from the given reader.
-    pub fn new(reader: R) -> PackagesParser<R> {
-        PackagesParser {
-            events: EventReader::new(reader),
-            current_item: None,
-        }
-    }
-
-    /// Shorthand for exiting with an error at the current position.
-    fn err(&self, kind: ParserErrorKind) -> ParserError {
-        ParserError {
-            position: self.events.position(),
-            kind,
-        }
-    }
-
-    /// Tries to read the next `StorePath` from the reader or fail with an error
-    /// if there was a parse failure.
-    ///
-    /// Returns Ok(None) if the end of the stream was reached.
-    ///
-    /// This function is like `.next` from `Iterator`, but allows us to use `try! / ?` since it
-    /// returns `Result<Option<...>, ...>` instead of `Option<Result<..., ...>>`.
-    fn next_err(&mut self) -> Result<Option<StorePath>, ParserError> {
-        use self::ParserErrorKind::*;
-        use self::XmlEvent::*;
-
-        loop {
-            let event = self
-                .events
-                .next()
-                .map_err(|e| self.err(XmlError { error: e }))?;
-            match event {
-                StartElement {
-                    name: element_name,
-                    attributes,
-                    ..
-                } => {
-                    if element_name.local_name == "item" {
-                        if self.current_item.is_some() {
-                            return Err(self.err(ParentNotAllowed {
-                                element_name: "item".to_string(),
-                                found_parent: "item".to_string(),
-                            }));
-                        }
-
-                        let mut attr_path = None;
-                        let mut system = None;
-
-                        for attr in attributes {
-                            if attr.name.local_name == "attrPath" {
-                                attr_path = Some(attr.value);
-                                continue;
-                            }
-
-                            if attr.name.local_name == "system" {
-                                system = Some(attr.value);
-                                continue;
-                            }
-                        }
-
-                        let attr_path = attr_path.ok_or_else(|| {
-                            self.err(MissingAttribute {
-                                element_name: "item".into(),
-                                attribute_name: "attrPath".into(),
-                            })
-                        })?;
-
-                        let system = system.ok_or_else(|| {
-                            self.err(MissingAttribute {
-                                element_name: "item".into(),
-                                attribute_name: "system".into(),
-                            })
-                        })?;
-
-                        self.current_item = Some((attr_path, system));
-                        continue;
-                    }
-
-                    if element_name.local_name == "output" {
-                        if let Some((item, system)) = self.current_item.clone() {
-                            let mut output_name = None;
-                            let mut output_path = None;
-
-                            for attr in attributes {
-                                if attr.name.local_name == "name" {
-                                    output_name = Some(attr.value);
-                                    continue;
-                                }
-
-                                if attr.name.local_name == "path" {
-                                    output_path = Some(attr.value);
-                                    continue;
-                                }
-                            }
-
-                            let output_name = output_name.ok_or_else(|| {
-                                self.err(MissingAttribute {
-                                    element_name: "output".into(),
-                                    attribute_name: "name".into(),
-                                })
-                            })?;
-
-                            let output_path = output_path.ok_or_else(|| {
-                                self.err(MissingAttribute {
-                                    element_name: "output".into(),
-                                    attribute_name: "path".into(),
-                                })
-                            })?;
-
-                            let origin = PathOrigin {
-                                attr: item,
-                                output: output_name,
-                                toplevel: true,
-                                system: Some(system),
-                            };
-                            let store_path = StorePath::parse(origin, &output_path);
-                            let store_path = store_path
-                                .ok_or_else(|| self.err(InvalidStorePath { path: output_path }))?;
-
-                            return Ok(Some(store_path));
-                        } else {
-                            return Err(self.err(MissingParent {
-                                element_name: "output".into(),
-                                expected_parent: "item".into(),
-                            }));
-                        }
-                    }
-                }
-
-                EndElement { name: element_name } => {
-                    if element_name.local_name == "item" {
-                        if self.current_item.is_none() {
-                            return Err(self.err(MissingStartTag {
-                                element_name: "item".into(),
-                            }));
-                        }
-                        self.current_item = None
-                    }
-                }
-
-                EndDocument => break,
-
-                _ => {}
-            }
-        }
-
-        Ok(None)
-    }
+#[derive(Debug, Deserialize)]
+struct Items {
+    #[serde(rename = "item", default, deserialize_with = "package_outputs")]
+    outputs: Vec<PackageOutput>,
 }
 
-impl<R: Read> Iterator for PackagesParser<R> {
-    type Item = Result<StorePath, ParserError>;
+fn package_outputs<'de, D: Deserializer<'de>>(
+    deserializer: D,
+) -> Result<Vec<PackageOutput>, D::Error> {
+    struct ItemsVisitor;
 
-    fn next(&mut self) -> Option<Result<StorePath, ParserError>> {
-        match self.next_err() {
-            Err(e) => Some(Err(e)),
-            Ok(Some(i)) => Some(Ok(i)),
-            Ok(None) => None,
+    impl<'de> Visitor<'de> for ItemsVisitor {
+        type Value = Vec<PackageOutput>;
+
+        fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
+            write!(formatter, "a sequence of `<item>` elements")
+        }
+
+        fn visit_seq<A: SeqAccess<'de>>(self, mut seq: A) -> Result<Self::Value, A::Error> {
+            let mut outputs = Vec::new();
+            while let Some(item) = seq.next_element::<Item>()? {
+                item.consume(&mut outputs)?;
+            }
+            Ok(outputs)
         }
     }
+
+    deserializer.deserialize_seq(ItemsVisitor)
 }
 
 /// Enumeration of all the possible errors that may happen during querying the packages.

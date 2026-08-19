@@ -41,6 +41,7 @@ async fn update_index(args: &Args) -> Result<()> {
                 vec![args.system.as_deref()],
                 &args.extra_scopes,
                 args.show_trace,
+                !args.no_main_program,
             )?;
             (Either::Right(f), w)
         }
@@ -162,6 +163,10 @@ struct Args {
     /// Only add paths starting with PREFIX (e.g. `/bin/`)
     #[clap(long, default_value = "")]
     filter_prefix: String,
+
+    /// Do not synthesize a listing for `meta.mainProgram` under `/bin/`
+    #[clap(long)]
+    no_main_program: bool,
 
     /// Store and load results of fetch phase in a file called paths.cache. This speeds up testing
     /// different database formats / compression.

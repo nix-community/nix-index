@@ -72,6 +72,7 @@ async fn update_index(args: &Args) -> Result<()> {
         systems,
         &args.extra_scopes,
         args.show_trace,
+        true, // Synthesize a listing for `meta.mainProgram` under `bin/` when appropriate
     )?;
 
     // Treat request errors as if the file list were missing
