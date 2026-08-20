@@ -64,6 +64,7 @@ pub fn query_packages(
         parser: None,
         child: None,
         cmd: Some(cmd),
+        had_error: false,
     }
 }
 
@@ -74,6 +75,7 @@ pub struct PackagesQuery<R: Read> {
     parser: Option<PackagesParser<R>>,
     child: Option<Child>,
     cmd: Option<Command>,
+    had_error: bool,
 }
 
 impl PackagesQuery<ChildStdout> {
@@ -125,6 +127,11 @@ impl Iterator for PackagesQuery<ChildStdout> {
     type Item = Result<StorePath, Error>;
 
     fn next(&mut self) -> Option<Self::Item> {
+        // if we emitted an error in the previous call to next,
+        // there is nothing meaningful we can emit, so signal that we have no more elements to emit.
+        if self.had_error {
+            return None;
+        }
         if let Err(e) = self.ensure_initialized() {
             return Some(Err(e));
         }
@@ -137,7 +144,10 @@ impl Iterator for PackagesQuery<ChildStdout> {
                     //
                     // If the subprocess returned an error, then the parser probably tried to parse garbage output
                     // so we will ignore the parser error and instead return the error printed by the subprocess.
-                    v.map_err(|e| self.check_error().unwrap_or_else(|| Error::from(e)))
+                    v.map_err(|e| {
+                        self.had_error = true;
+                        self.check_error().unwrap_or_else(|| Error::from(e))
+                    })
                 })
                 .or_else(|| {
                     self.parser = None;
