@@ -5,3 +5,4 @@ target
 .direnv/
 .envrc
 *.sqlite
+paths.cache
