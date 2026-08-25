@@ -17,7 +17,7 @@ command_not_found_handle () {
     toplevel=nixpkgs # nixpkgs should always be available even in NixOS
     cmd=$1
     attrs=$(@out@/bin/nix-locate --minimal --no-group --type x --type s --whole-name --at-root "/bin/$cmd")
-    len=$(echo -n "$attrs" | grep -c "^")
+    test "${attrs}" && len=$(echo "$attrs" | wc -l) || len=0
 
     case $len in
         0)
