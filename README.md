@@ -95,6 +95,29 @@ following to your Nushell config:
   };
 ```
 
+### Faster `command_not_found` Index
+
+The default setup above is great to see _everything_ in every package, but filtering this to only what is needed makes this much faster.
+
+Using hyperfine, it takes ~2 seconds using the full index. Using the index generated with the options below will have all the same functionality for a `command_not_found` function/command:
+
+```
+$ ...nix-index --filter-prefix '/bin/' --db ~/.cache/nix-index-not-found/ ...
+```
+
+then in the script you are using for `command_not_found` add the `--db ~/.cache/nix-index-not-found/` option to use the smaller index.
+
+#### Speeds
+
+Speeds also include the time it takes to build the index once. This might not be super accurate, though I used a pre-generated cache to make sure that the speed would be as similar as possible.
+
+The first row is the default index that was created using the plain `nix-index` command. The second row is using the filtered index. The options above move the normal index location so that `nix-locate` will retain its current functionality.
+
+|          build_time          |         speed          |     stddev      |   size   |
+|------------------------------|------------------------|-----------------|----------|
+| 6min 11sec 884ms 322µs 582ns | 2sec 328ms 569µs 676ns | 83ms 829µs 45ns | 83.6 MiB |
+|      42sec 518ms 400µs 433ns |       30ms 654µs 262ns | 4ms 199µs 949ns |  1.5 MiB |
+
 ## Contributing
 If you find any missing features that you would like to implement, I'm very happy about any PRs! You can also create an issue first if the feature is more complex so we can discuss possible implementations.
 
