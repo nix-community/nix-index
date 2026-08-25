@@ -43,8 +43,8 @@ command_not_found_handle () {
 The program '$cmd' is currently not installed. It is provided by
 the package '$toplevel.$attrs', which I will now install for you.
 EOF
-                if [ -e "$HOME/.nix-profile/manifest.json" ]; then
-                    nix profile install $toplevel#$attrs
+                if [ -e "${XDG_STATE_HOME-$HOME/.local/state}/nix/profile" ] || [ -e "$HOME/.nix-profile/manifest.json" ]; then
+                    nix profile add $toplevel#$attrs
                 else
                     nix-env -iA $toplevel.$attrs
                 fi
@@ -71,11 +71,11 @@ $cmd: command not found
 EOF
                 fi
             else
-                if [ -e "$HOME/.nix-profile/manifest.json" ]; then
+                if [ -e "${XDG_STATE_HOME-$HOME/.local/state}/nix/profile" ] || [ -e "$HOME/.nix-profile/manifest.json" ]; then
                     >&2 cat <<EOF
 The program '$cmd' is currently not installed. You can install it
 by typing:
-  nix profile install $toplevel#$attrs
+  nix profile add $toplevel#$attrs
 
 Or run it once with:
   nix shell $toplevel#$attrs -c $cmd ...
@@ -101,8 +101,8 @@ EOF
             # ensure we get each element of attrs
             # in a cross platform way
             while read attr; do
-                if [ -e "$HOME/.nix-profile/manifest.json" ]; then
-                    >&2 echo "  nix profile install $toplevel#$attr"
+                if [ -e "${XDG_STATE_HOME-$HOME/.local/state}/nix/profile" ] || [ -e "$HOME/.nix-profile/manifest.json" ]; then
+                    >&2 echo "  nix profile add $toplevel#$attr"
                 else
                     >&2 echo "  nix-env -iA $toplevel.$attr"
                 fi
@@ -114,7 +114,7 @@ Or run it once with:
 EOF
 
             while read attr; do
-                if [ -e "$HOME/.nix-profile/manifest.json" ]; then
+                if [ -e "${XDG_STATE_HOME-$HOME/.local/state}/nix/profile" ] || [ -e "$HOME/.nix-profile/manifest.json" ]; then
                     >&2 echo "  nix shell $toplevel#$attr -c $cmd ..."
                 else
                     >&2 echo "  nix-shell -p $attr --run '$cmd ...'"
