@@ -137,7 +137,10 @@ impl Iterator for PackagesQuery<ChildStdout> {
                     //
                     // If the subprocess returned an error, then the parser probably tried to parse garbage output
                     // so we will ignore the parser error and instead return the error printed by the subprocess.
-                    v.map_err(|e| self.check_error().unwrap_or_else(|| Error::from(e)))
+                    v.map_err(|e| {
+                        self.parser = None;
+                        self.check_error().unwrap_or_else(|| Error::from(e))
+                    })
                 })
                 .or_else(|| {
                     self.parser = None;
