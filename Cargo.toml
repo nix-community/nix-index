@@ -48,7 +48,7 @@ tokio-retry = "0.3.1"
 xdg = "3.0.0"
 xml-rs = "1.0.0"
 xz2 = "0.1.7"
-zstd = { version = "0.13.3", features = [ "zstdmt" ] }
+zstd = { version = "0.14.0", features = [ "zstdmt" ] }
 
 [dependencies.tokio]
 features = ["full"]
