@@ -216,7 +216,7 @@ struct Args {
     //
     // We only need sets that are not marked "recurseIntoAttrs" here, since if they are,
     // they are already part of normal_paths.
-    #[clap(long, default_values = ["haskellPackages", "rPackages", "coqPackages", "texlive.pkgs"])]
+    #[clap(long, default_values = ["haskellPackages", "rPackages", "texlive.pkgs"])]
     extra_scopes: Vec<String>,
 }
 
