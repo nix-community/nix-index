@@ -80,13 +80,15 @@ async fn update_index(args: &Args) -> Result<()> {
         path: args.database.clone(),
         source: e,
     })?;
-    let mut db =
-        Writer::create(args.database.join("files"), args.compression_level).map_err(|e| {
-            Error::CreateDatabase {
-                path: args.database.clone(),
-                source: Box::new(e),
-            }
-        })?;
+    let mut db = Writer::create(
+        args.database.join("files"),
+        args.compression_level,
+        args.format_version,
+    )
+    .map_err(|e| Error::CreateDatabase {
+        path: args.database.clone(),
+        source: Box::new(e),
+    })?;
 
     let mut results: Vec<(StorePath, String, FileTree)> = Vec::new();
     while let Some(entry) = files.next().await {
@@ -154,6 +156,11 @@ struct Args {
     /// Zstandard compression level
     #[clap(short, long = "compression", default_value = "22")]
     compression_level: i32,
+
+    /// Database format version to write. Version 2 (default) is split into parallel-searchable
+    /// frames; version 1 is the legacy single-frame format for older nix-locate binaries.
+    #[clap(long, default_value = "2", value_parser = clap::value_parser!(u64).range(1..=2))]
+    format_version: u64,
 
     /// Show a stack trace in the case of a Nix evaluation error
     #[clap(long)]
